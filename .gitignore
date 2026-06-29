@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Vim
+*.swp
+*.swo
+
+# Temporary files
+*~
