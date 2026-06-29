@@ -1,369 +1,402 @@
 #!/usr/bin/env python3
 
 """
-analysis_normalize_brumir2ref.py
+Figure 3B – BrumiR2Reference cluster support analysis
 
 Description
 -----------
-This script integrates CD-HIT cluster membership, BrumiR2Reference mapping support,
-and sample metadata to generate cluster-level support summaries for downstream analysis.
+This script integrates CD-HIT cluster membership, BrumiR2Reference
+mapping support, and sample metadata to generate cluster-level support
+summaries for downstream manuscript analysis.
 
 It computes:
 - number of passfilter, nonpassfilter, and unmapped members per cluster
 - sample and group presence per cluster
-- optional core membership flags using p0.8 and/or p1.0 core sets
+- optional core membership flags using p=0.8 and/or p=1.0 core sets
 
 Inputs
 ------
---csv            Sample metadata CSV with columns: ID,status
---clstr          CD-HIT .clstr file
---passfilter     BrumiR2Reference passfilter table
---nonpassfilter  BrumiR2Reference nonpassfilter table
---core_p08       Optional core sets TSV for p=0.8
---core_p10       Optional core sets TSV for p=1.0
---out_prefix     Output prefix
+--csv
+    Sample metadata CSV with columns: ID,status
+
+--clstr
+    CD-HIT .clstr file defining cluster membership.
+
+--passfilter
+    BrumiR2Reference passfilter table.
+
+--nonpassfilter
+    BrumiR2Reference nonpassfilter table.
+
+--core_p08
+    Optional core sets TSV for p=0.8.
+
+--core_p10
+    Optional core sets TSV for p=1.0.
+
+--out_prefix
+    Output prefix.
 
 Outputs
 -------
-<prefix>.cluster_support.tsv
-<prefix>.core_summary.tsv
-<prefix>.core_membership.tsv (optional)
-"""
+<out_prefix>.cluster_support.tsv
+<out_prefix>.core_summary.tsv
+<out_prefix>.core_membership.tsv, if core sets are provided
 
-"""
-analysis_normalize_brumir2ref.py
-
-Purpose
--------
-Normalize and reconcile identifiers across:
-  1) CD-HIT cluster definitions (cluster_X; defined by the .clstr file)
-  2) BrumiR-RF member identifiers (SAMPLE|SEQID; embedded in CD-HIT .clstr)
-  3) BrumiR2Reference mapping outputs (passfilter/nonpassfilter tables, where
-     the miRNA ID column contains SAMPLE|SEQID)
-
-This script produces cluster-centric reports that are directly usable for
-Module III (Analysis), enabling:
-  - cluster-level genome support statistics (pass/non-pass/unmapped)
-  - sample/group presence summaries (athlete vs sedentary)
-  - optional annotation of "core" clusters under two thresholds (e.g., 0.8 and 1.0)
-
-Inputs
-------
-- CD-HIT .clstr file:
-    all.candidates_clustered.fasta.clstr
-  Defines cluster -> list of member IDs (SAMPLE|SEQID) and representative (*).
-
-- BrumiR2Reference tables:
-    brumir2ref.<identity>.passfilter.txt
-    brumir2ref.<identity>.nonpassfilter.txt
-  These contain an ID column (miRNA; column 2) matching SAMPLE|SEQID.
-
-- Sample sheet CSV:
-    files_to_process.csv
-  Must contain columns: ID, status (status expected: athlete/sedentary)
-
-- Optional core set tables (from Module II):
-    brumir.<identity>.core_sets.tsv        (e.g., p=0.8)
-    brumir.<identity>.p10.core_sets.tsv    (e.g., p=1.0)
-  Format: set<TAB>miRNA where miRNA == cluster_X.
-
-Outputs
--------
-Given an output prefix (e.g., results/analysis/brumir095), the script writes:
-  - <prefix>.cluster_support.tsv
-      One row per cluster with genome support + sample/group presence + core flags.
-
-  - <prefix>.core_summary.tsv
-      High-level summaries per core set (if provided).
-
-  - <prefix>.core_membership.tsv
-      Optional: detailed listing of clusters that belong to each core set.
+Usage
+-----
+python3 Figure3B_analysis_BrumiR2Reference.py \\
+  --csv files_to_process.csv \\
+  --clstr all.candidates_clustered.fasta.clstr \\
+  --passfilter brumir2ref.passfilter.txt \\
+  --nonpassfilter brumir2ref.nonpassfilter.txt \\
+  --core_p08 brumir.core_sets.tsv \\
+  --core_p10 brumir.p10.core_sets.tsv \\
+  --out_prefix results/analysis/brumir095
 
 Notes
 -----
 - The .clstr file is the source of truth for cluster membership.
-- passfilter/nonpassfilter IDs are matched against cluster member IDs (SAMPLE|SEQID).
-- Some cluster members may be absent from both passfilter and nonpassfilter
-  (e.g., not reported by BrumiR2Reference). These are counted as "unmapped".
+- passfilter/nonpassfilter IDs are matched against cluster member IDs.
+- Unreported members are counted as unmapped.
 """
 
 import argparse
 import csv
-import os
 import re
 from collections import defaultdict
-from typing import Dict, List, Set, Tuple, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
 
 
-# Capture SAMPLE|SEQID from lines like: ">SRR11363960|30072... *"
 CLSTR_MEMBER_RE = re.compile(r">(.+?)\.\.\.")
 
 
-def read_samples_csv(csv_path: str) -> Tuple[Dict[str, str], Dict[str, List[str]]]:
+def validate_file(path: str, label: str) -> Path:
+    """Validate that an input file exists."""
+    file_path = Path(path)
+
+    if not file_path.is_file():
+        raise SystemExit(f"ERROR: {label} not found: {file_path}")
+
+    return file_path
+
+
+def read_samples_csv(csv_path: Path) -> Tuple[Dict[str, str], Dict[str, List[str]]]:
     """
     Read sample metadata CSV.
 
     Required columns:
-      - ID
-      - status (expected values: athlete/sedentary)
-
-    Returns
-    -------
-    statuses : dict
-        sample_id -> status (lowercase)
-    groups : dict
-        status -> [sample_ids] preserving CSV order
+    - ID
+    - status
     """
     statuses: Dict[str, str] = {}
     groups: Dict[str, List[str]] = defaultdict(list)
 
-    with open(csv_path, newline="") as fh:
+    with csv_path.open(newline="") as fh:
         reader = csv.DictReader(fh)
+
         if not reader.fieldnames:
             raise SystemExit("ERROR: Sample CSV is empty or missing a header row.")
 
-        required = {"ID", "status"}
-        missing = required - set(reader.fieldnames)
-        if missing:
-            raise SystemExit(f"ERROR: Sample CSV missing required columns: {', '.join(sorted(missing))}")
+        required_columns = {"ID", "status"}
+        missing_columns = required_columns - set(reader.fieldnames)
+
+        if missing_columns:
+            raise SystemExit(
+                "ERROR: Sample CSV missing required columns: "
+                f"{', '.join(sorted(missing_columns))}"
+            )
 
         for row in reader:
-            sid = (row.get("ID") or "").strip()
-            st = (row.get("status") or "").strip().lower()
-            if not sid:
+            sample_id = (row.get("ID") or "").strip()
+            status = (row.get("status") or "").strip().lower()
+
+            if not sample_id:
                 continue
-            statuses[sid] = st
-            groups[st].append(sid)
+
+            statuses[sample_id] = status
+            groups[status].append(sample_id)
 
     return statuses, groups
 
 
-def parse_clstr(clstr_path: str) -> Tuple[Dict[int, List[str]], Dict[int, str]]:
+def parse_clstr(clstr_path: Path) -> Tuple[Dict[int, List[str]], Dict[int, str]]:
     """
     Parse a CD-HIT .clstr file.
 
-    Returns
-    -------
-    cluster_members : dict
-        cluster_id -> [member_id (SAMPLE|SEQID), ...]
-    cluster_rep : dict
-        cluster_id -> representative member_id (marked by '*'; fallback to first member)
+    Returns:
+    - cluster_members: cluster_id -> member IDs
+    - cluster_rep: cluster_id -> representative member ID
     """
     cluster_members: Dict[int, List[str]] = defaultdict(list)
     cluster_rep: Dict[int, str] = {}
 
-    current: Optional[int] = None
+    current_cluster: Optional[int] = None
 
-    with open(clstr_path, "r") as fh:
-        for raw in fh:
-            line = raw.strip()
+    with clstr_path.open("r") as fh:
+        for raw_line in fh:
+            line = raw_line.strip()
+
             if not line:
                 continue
 
             if line.startswith(">Cluster"):
-                current = int(line.split()[-1])
+                current_cluster = int(line.split()[-1])
                 continue
 
-            if current is None:
+            if current_cluster is None:
                 continue
 
-            m = CLSTR_MEMBER_RE.search(line)
-            if not m:
+            match = CLSTR_MEMBER_RE.search(line)
+            if not match:
                 continue
 
-            member_id = m.group(1).strip()  # SAMPLE|SEQID
-            cluster_members[current].append(member_id)
+            member_id = match.group(1).strip()
+            cluster_members[current_cluster].append(member_id)
 
             if line.endswith("*"):
-                cluster_rep[current] = member_id
+                cluster_rep[current_cluster] = member_id
 
-    # Fallback representative: first member if none marked with '*'
-    for cid, mems in cluster_members.items():
-        if cid not in cluster_rep and mems:
-            cluster_rep[cid] = mems[0]
+    for cluster_id, members in cluster_members.items():
+        if cluster_id not in cluster_rep and members:
+            cluster_rep[cluster_id] = members[0]
 
     return dict(cluster_members), cluster_rep
 
 
 def sample_from_member(member_id: str) -> str:
-    """
-    Extract sample ID from a cluster member ID.
-
-    member_id format: SAMPLE|SEQID
-    """
+    """Extract sample ID from a member ID formatted as SAMPLE|SEQID."""
     if "|" in member_id:
         return member_id.split("|", 1)[0]
+
     return "NA"
 
 
-def parse_brumir2ref_ids(tab_path: str) -> Set[str]:
+def parse_brumir2ref_ids(table_path: Path) -> Set[str]:
     """
     Parse BrumiR2Reference passfilter/nonpassfilter tables.
 
-    Expected format:
-      - First line is a header beginning with '#'
-      - Column 2 (index 1) contains miRNA ID == SAMPLE|SEQID
-
-    Returns
-    -------
-    ids : set
-        Set of SAMPLE|SEQID values observed in the table.
+    Column 2 is expected to contain miRNA IDs matching SAMPLE|SEQID.
     """
     ids: Set[str] = set()
 
-    with open(tab_path, "r", encoding="utf-8", errors="replace") as fh:
-        for i, raw in enumerate(fh):
-            line = raw.rstrip("\n")
+    with table_path.open("r", encoding="utf-8", errors="replace") as fh:
+        for line_number, raw_line in enumerate(fh):
+            line = raw_line.rstrip("\n")
+
             if not line:
                 continue
-            if i == 0 and line.startswith("#"):
+
+            if line_number == 0 and line.startswith("#"):
                 continue
+
             if line.startswith("#"):
                 continue
 
-            parts = line.split("\t")
-            if len(parts) < 2:
+            fields = line.split("\t")
+
+            if len(fields) < 2:
                 continue
 
-            mid = parts[1].strip()
-            if mid:
-                ids.add(mid)
+            mirna_id = fields[1].strip()
+
+            if mirna_id:
+                ids.add(mirna_id)
 
     return ids
 
 
-def read_core_sets(core_tsv: str) -> Tuple[Set[str], Set[str]]:
+def read_core_sets(core_tsv: Path) -> Tuple[Set[str], Set[str]]:
     """
     Read core set file produced by Module II.
 
-    Format:
-      set<TAB>miRNA
-    where:
-      set is athlete_core or sedentary_core
-      miRNA is cluster_X
-
-    Returns
-    -------
-    athlete_core : set[str]
-    sedentary_core : set[str]
+    Expected format:
+    set<TAB>miRNA
     """
-    athlete: Set[str] = set()
-    sedentary: Set[str] = set()
+    athlete_core: Set[str] = set()
+    sedentary_core: Set[str] = set()
 
-    with open(core_tsv, "r", encoding="utf-8", errors="replace") as fh:
+    with core_tsv.open("r", encoding="utf-8", errors="replace") as fh:
         _header = fh.readline()
-        for raw in fh:
-            line = raw.strip()
+
+        for raw_line in fh:
+            line = raw_line.strip()
+
             if not line:
                 continue
-            sname, item = line.split("\t", 1)
-            sname = sname.strip()
+
+            set_name, item = line.split("\t", 1)
+            set_name = set_name.strip()
             item = item.strip()
 
-            if sname == "athlete_core":
-                athlete.add(item)
-            elif sname == "sedentary_core":
-                sedentary.add(item)
+            if set_name == "athlete_core":
+                athlete_core.add(item)
+            elif set_name == "sedentary_core":
+                sedentary_core.add(item)
 
-    return athlete, sedentary
+    return athlete_core, sedentary_core
 
 
-def safe_div(a: int, b: int) -> float:
-    return (a / b) if b else 0.0
+def safe_div(numerator: int, denominator: int) -> float:
+    """Divide safely, returning 0.0 when denominator is zero."""
+    return (numerator / denominator) if denominator else 0.0
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "Normalize CD-HIT cluster membership against BrumiR2Reference IDs "
+            "and generate analysis-ready reports."
+        )
+    )
+
+    parser.add_argument(
+        "--csv",
+        required=True,
+        help="Sample sheet CSV. Must contain columns: ID,status.",
+    )
+    parser.add_argument(
+        "--clstr",
+        required=True,
+        help="CD-HIT .clstr file defining cluster membership.",
+    )
+    parser.add_argument(
+        "--passfilter",
+        required=True,
+        help="BrumiR2Reference passfilter table.",
+    )
+    parser.add_argument(
+        "--nonpassfilter",
+        required=True,
+        help="BrumiR2Reference nonpassfilter table.",
+    )
+    parser.add_argument(
+        "--core_p08",
+        default=None,
+        help="Optional core sets TSV, for example p=0.8.",
+    )
+    parser.add_argument(
+        "--core_p10",
+        default=None,
+        help="Optional core sets TSV, for example p=1.0.",
+    )
+    parser.add_argument(
+        "--out_prefix",
+        required=True,
+        help="Output prefix, for example results/analysis/brumir095.",
+    )
+
+    return parser.parse_args()
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(
-        description="Normalize CD-HIT cluster membership against BrumiR2Reference IDs and generate analysis-ready reports."
-    )
-    ap.add_argument("--csv", required=True, help="Sample sheet CSV (must contain columns: ID,status).")
-    ap.add_argument("--clstr", required=True, help="CD-HIT .clstr file defining cluster membership.")
-    ap.add_argument("--passfilter", required=True, help="BrumiR2Reference passfilter table (tab-delimited).")
-    ap.add_argument("--nonpassfilter", required=True, help="BrumiR2Reference nonpassfilter table (tab-delimited).")
-    ap.add_argument("--core_p08", default=None, help="Optional core sets TSV (e.g., p=0.8).")
-    ap.add_argument("--core_p10", default=None, help="Optional core sets TSV (e.g., p=1.0).")
-    ap.add_argument("--out_prefix", required=True, help="Output prefix (e.g., results/analysis/brumir095).")
-    args = ap.parse_args()
+    """Run BrumiR2Reference cluster support analysis."""
+    args = parse_args()
 
-    statuses, _groups = read_samples_csv(args.csv)
-    cluster_members, cluster_rep = parse_clstr(args.clstr)
+    csv_path = validate_file(args.csv, "Sample CSV")
+    clstr_path = validate_file(args.clstr, "CD-HIT .clstr file")
+    passfilter_path = validate_file(args.passfilter, "Passfilter table")
+    nonpassfilter_path = validate_file(args.nonpassfilter, "Nonpassfilter table")
 
-    pass_ids = parse_brumir2ref_ids(args.passfilter)
-    nonpass_ids = parse_brumir2ref_ids(args.nonpassfilter)
+    core_p08_path = validate_file(args.core_p08, "Core p=0.8 TSV") if args.core_p08 else None
+    core_p10_path = validate_file(args.core_p10, "Core p=1.0 TSV") if args.core_p10 else None
 
-    # Optional core sets
-    core08_a: Set[str] = set()
-    core08_s: Set[str] = set()
-    core10_a: Set[str] = set()
-    core10_s: Set[str] = set()
+    out_prefix = Path(args.out_prefix)
+    out_support = Path(f"{out_prefix}.cluster_support.tsv")
+    out_summary = Path(f"{out_prefix}.core_summary.tsv")
+    out_membership = Path(f"{out_prefix}.core_membership.tsv")
 
-    if args.core_p08:
-        core08_a, core08_s = read_core_sets(args.core_p08)
-    if args.core_p10:
-        core10_a, core10_s = read_core_sets(args.core_p10)
+    out_support.parent.mkdir(parents=True, exist_ok=True)
 
-    out_support = f"{args.out_prefix}.cluster_support.tsv"
-    out_summary = f"{args.out_prefix}.core_summary.tsv"
-    out_membership = f"{args.out_prefix}.core_membership.tsv"
+    statuses, _groups = read_samples_csv(csv_path)
+    cluster_members, cluster_rep = parse_clstr(clstr_path)
 
-    os.makedirs(os.path.dirname(out_support) or ".", exist_ok=True)
+    pass_ids = parse_brumir2ref_ids(passfilter_path)
+    nonpass_ids = parse_brumir2ref_ids(nonpassfilter_path)
 
-    # Build cluster-centric metrics
+    core08_athlete: Set[str] = set()
+    core08_sedentary: Set[str] = set()
+    core10_athlete: Set[str] = set()
+    core10_sedentary: Set[str] = set()
+
+    if core_p08_path:
+        core08_athlete, core08_sedentary = read_core_sets(core_p08_path)
+
+    if core_p10_path:
+        core10_athlete, core10_sedentary = read_core_sets(core_p10_path)
+
     rows = []
-    for cid in sorted(cluster_members.keys()):
-        mems = cluster_members[cid]
-        rep = cluster_rep.get(cid, mems[0] if mems else "")
-        mem_set = set(mems)
 
-        n_members = len(mems)
-        n_pass = len(mem_set & pass_ids)
-        n_nonpass = len(mem_set & nonpass_ids)
+    for cluster_id in sorted(cluster_members.keys()):
+        members = cluster_members[cluster_id]
+        representative = cluster_rep.get(cluster_id, members[0] if members else "")
+        member_set = set(members)
 
-        # Members not reported by BrumiR2Reference at all
-        n_unmapped = n_members - len(mem_set & (pass_ids | nonpass_ids))
+        n_members = len(members)
+        n_pass = len(member_set & pass_ids)
+        n_nonpass = len(member_set & nonpass_ids)
+        n_unmapped = n_members - len(member_set & (pass_ids | nonpass_ids))
 
-        # Sample/group presence based on member IDs
-        sample_set = {sample_from_member(m) for m in mems}
+        sample_set = {sample_from_member(member) for member in members}
         sample_set.discard("NA")
 
-        a_samples = {s for s in sample_set if statuses.get(s, "") == "athlete"}
-        s_samples = {s for s in sample_set if statuses.get(s, "") == "sedentary"}
+        athlete_samples = {
+            sample for sample in sample_set
+            if statuses.get(sample, "") == "athlete"
+        }
+        sedentary_samples = {
+            sample for sample in sample_set
+            if statuses.get(sample, "") == "sedentary"
+        }
 
-        feat = f"cluster_{cid}"
+        cluster_name = f"cluster_{cluster_id}"
 
         rows.append({
-            "cluster": feat,
-            "cluster_id": cid,
-            "rep_member": rep,
+            "cluster": cluster_name,
+            "cluster_id": cluster_id,
+            "rep_member": representative,
             "n_members": n_members,
             "n_pass": n_pass,
             "n_nonpass": n_nonpass,
             "n_unmapped": n_unmapped,
             "pass_frac": f"{safe_div(n_pass, n_members):.4f}",
             "samples_total": len(sample_set),
-            "samples_athlete": len(a_samples),
-            "samples_sedentary": len(s_samples),
-            "is_core08_athlete": int(feat in core08_a),
-            "is_core08_sedentary": int(feat in core08_s),
-            "is_core10_athlete": int(feat in core10_a),
-            "is_core10_sedentary": int(feat in core10_s),
+            "samples_athlete": len(athlete_samples),
+            "samples_sedentary": len(sedentary_samples),
+            "is_core08_athlete": int(cluster_name in core08_athlete),
+            "is_core08_sedentary": int(cluster_name in core08_sedentary),
+            "is_core10_athlete": int(cluster_name in core10_athlete),
+            "is_core10_sedentary": int(cluster_name in core10_sedentary),
         })
 
-    # Write cluster_support.tsv
     header = [
-        "cluster", "cluster_id", "rep_member",
-        "n_members", "n_pass", "n_nonpass", "n_unmapped", "pass_frac",
-        "samples_total", "samples_athlete", "samples_sedentary",
-        "is_core08_athlete", "is_core08_sedentary",
-        "is_core10_athlete", "is_core10_sedentary",
+        "cluster",
+        "cluster_id",
+        "rep_member",
+        "n_members",
+        "n_pass",
+        "n_nonpass",
+        "n_unmapped",
+        "pass_frac",
+        "samples_total",
+        "samples_athlete",
+        "samples_sedentary",
+        "is_core08_athlete",
+        "is_core08_sedentary",
+        "is_core10_athlete",
+        "is_core10_sedentary",
     ]
-    with open(out_support, "w", newline="") as out:
-        out.write("\t".join(header) + "\n")
-        for r in rows:
-            out.write("\t".join(str(r[h]) for h in header) + "\n")
 
-    # Core summaries (only if core sets are provided)
+    with out_support.open("w", newline="") as out:
+        out.write("\t".join(header) + "\n")
+
+        for row in rows:
+            out.write("\t".join(str(row[column]) for column in header) + "\n")
+
     def summarize_core(name: str, core_set: Set[str]) -> Dict[str, str]:
+        """Summarize BrumiR2Reference support within a core set."""
         if not core_set:
             return {
                 "set": name,
@@ -373,70 +406,91 @@ def main() -> None:
                 "mean_pass_frac": "NA",
             }
 
-        sub = [r for r in rows if r["cluster"] in core_set]
-        n = len(sub)
+        subset = [row for row in rows if row["cluster"] in core_set]
+        n_clusters = len(subset)
 
-        any_pass = sum(1 for r in sub if int(r["n_pass"]) > 0)
-
-        # All members mapped and all mapped members are passfilter
-        all_pass = sum(
-            1 for r in sub
-            if int(r["n_unmapped"]) == 0
-            and int(r["n_nonpass"]) == 0
-            and int(r["n_pass"]) == int(r["n_members"])
+        clusters_with_any_pass = sum(
+            1 for row in subset
+            if int(row["n_pass"]) > 0
         )
 
-        mean_pass = sum(float(r["pass_frac"]) for r in sub) / n if n else 0.0
+        clusters_all_pass = sum(
+            1 for row in subset
+            if int(row["n_unmapped"]) == 0
+            and int(row["n_nonpass"]) == 0
+            and int(row["n_pass"]) == int(row["n_members"])
+        )
+
+        mean_pass_frac = (
+            sum(float(row["pass_frac"]) for row in subset) / n_clusters
+            if n_clusters else 0.0
+        )
 
         return {
             "set": name,
-            "n_clusters": str(n),
-            "clusters_with_any_pass": str(any_pass),
-            "clusters_all_pass": str(all_pass),
-            "mean_pass_frac": f"{mean_pass:.4f}",
+            "n_clusters": str(n_clusters),
+            "clusters_with_any_pass": str(clusters_with_any_pass),
+            "clusters_all_pass": str(clusters_all_pass),
+            "mean_pass_frac": f"{mean_pass_frac:.4f}",
         }
 
     summaries = []
-    if args.core_p08:
-        summaries.append(summarize_core("core08_athlete", core08_a))
-        summaries.append(summarize_core("core08_sedentary", core08_s))
-        summaries.append(summarize_core("core08_union", core08_a | core08_s))
-    if args.core_p10:
-        summaries.append(summarize_core("core10_athlete", core10_a))
-        summaries.append(summarize_core("core10_sedentary", core10_s))
-        summaries.append(summarize_core("core10_union", core10_a | core10_s))
 
-    with open(out_summary, "w", newline="") as out:
-        out.write("set\tn_clusters\tclusters_with_any_pass\tclusters_all_pass\tmean_pass_frac\n")
-        for s in summaries:
+    if core_p08_path:
+        summaries.append(summarize_core("core08_athlete", core08_athlete))
+        summaries.append(summarize_core("core08_sedentary", core08_sedentary))
+        summaries.append(summarize_core("core08_union", core08_athlete | core08_sedentary))
+
+    if core_p10_path:
+        summaries.append(summarize_core("core10_athlete", core10_athlete))
+        summaries.append(summarize_core("core10_sedentary", core10_sedentary))
+        summaries.append(summarize_core("core10_union", core10_athlete | core10_sedentary))
+
+    with out_summary.open("w", newline="") as out:
+        out.write(
+            "set\tn_clusters\tclusters_with_any_pass\t"
+            "clusters_all_pass\tmean_pass_frac\n"
+        )
+
+        for summary in summaries:
             out.write(
-                f"{s['set']}\t{s['n_clusters']}\t{s['clusters_with_any_pass']}\t{s['clusters_all_pass']}\t{s['mean_pass_frac']}\n"
+                f"{summary['set']}\t"
+                f"{summary['n_clusters']}\t"
+                f"{summary['clusters_with_any_pass']}\t"
+                f"{summary['clusters_all_pass']}\t"
+                f"{summary['mean_pass_frac']}\n"
             )
 
-    # Optional: detailed membership per core set (traceability/debug)
-    if args.core_p08 or args.core_p10:
-        with open(out_membership, "w", newline="") as out:
-            out.write("core_set\tcluster\tcluster_id\trep_member\tn_members\tn_pass\tn_nonpass\tn_unmapped\tpass_frac\n")
+    if core_p08_path or core_p10_path:
+        with out_membership.open("w", newline="") as out:
+            out.write(
+                "core_set\tcluster\tcluster_id\trep_member\tn_members\t"
+                "n_pass\tn_nonpass\tn_unmapped\tpass_frac\n"
+            )
 
             def emit_set(label: str, core_set: Set[str]) -> None:
-                for r in rows:
-                    if r["cluster"] in core_set:
+                for row in rows:
+                    if row["cluster"] in core_set:
                         out.write(
-                            f"{label}\t{r['cluster']}\t{r['cluster_id']}\t{r['rep_member']}\t"
-                            f"{r['n_members']}\t{r['n_pass']}\t{r['n_nonpass']}\t{r['n_unmapped']}\t{r['pass_frac']}\n"
+                            f"{label}\t{row['cluster']}\t{row['cluster_id']}\t"
+                            f"{row['rep_member']}\t{row['n_members']}\t"
+                            f"{row['n_pass']}\t{row['n_nonpass']}\t"
+                            f"{row['n_unmapped']}\t{row['pass_frac']}\n"
                         )
 
-            if args.core_p08:
-                emit_set("core08_athlete", core08_a)
-                emit_set("core08_sedentary", core08_s)
-            if args.core_p10:
-                emit_set("core10_athlete", core10_a)
-                emit_set("core10_sedentary", core10_s)
+            if core_p08_path:
+                emit_set("core08_athlete", core08_athlete)
+                emit_set("core08_sedentary", core08_sedentary)
+
+            if core_p10_path:
+                emit_set("core10_athlete", core10_athlete)
+                emit_set("core10_sedentary", core10_sedentary)
 
     print("OK")
     print(f"  wrote: {out_support}")
     print(f"  wrote: {out_summary}")
-    if args.core_p08 or args.core_p10:
+
+    if core_p08_path or core_p10_path:
         print(f"  wrote: {out_membership}")
 
 

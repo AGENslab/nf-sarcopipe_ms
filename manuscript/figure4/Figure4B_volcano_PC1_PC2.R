@@ -1,20 +1,70 @@
 #!/usr/bin/env Rscript
 
-################################################################################
-# Script: volcano_PC1_PC2.R
+############################################################
+# Figure 4B – Volcano plot corrected by PC1 and PC2
 #
 # Description:
-# Volcano plot with top 10 most significant genes labeled using HGNC symbols.
-################################################################################
+# This script generates a volcano plot from the gene-wise linear
+# model corrected by PC1 and PC2. The top 10 most significant
+# genes are labeled using HGNC symbols retrieved with biomaRt.
+#
+# Inputs:
+# - DEG CSV file from Figure4B_linear_model_PC1_PC2.R
+# - Output PNG file
+#
+# Outputs:
+# - Volcano plot PNG
+#
+# Usage:
+# Rscript Figure4B_volcano_PC1_PC2.R \
+#   DEG_PC1_PC2_corrected.csv \
+#   volcano_PC1_PC2_labeled.png
+#
+############################################################
 
-library(ggplot2)
-library(ggrepel)
-library(biomaRt)
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(ggrepel)
+  library(biomaRt)
+})
+
+args <- commandArgs(trailingOnly = TRUE)
+
+if (length(args) < 2) {
+  stop(
+    "Usage: Rscript Figure4B_volcano_PC1_PC2.R ",
+    "<DEG_PC1_PC2_corrected.csv> <output.png>",
+    call. = FALSE
+  )
+}
+
+in_csv <- args[1]
+out_png <- args[2]
+
+if (!file.exists(in_csv)) {
+  stop("Input CSV not found: ", in_csv, call. = FALSE)
+}
+
+out_dir <- dirname(out_png)
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 # -------------------------
 # LOAD DATA
 # -------------------------
-df <- read.csv("DEG_PC1_PC2_corrected.csv")
+df <- read.csv(in_csv)
+
+required_cols <- c("gene", "logFC", "padj")
+missing_cols <- setdiff(required_cols, colnames(df))
+
+if (length(missing_cols) > 0) {
+  stop(
+    "Input CSV is missing required columns: ",
+    paste(missing_cols, collapse = ", "),
+    call. = FALSE
+  )
+}
 
 # -------------------------
 # CALCULATE VALUES
@@ -34,9 +84,9 @@ ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
 
 annot <- getBM(
   attributes = c("refseq_mrna", "hgnc_symbol"),
-  filters    = "refseq_mrna",
-  values     = unique(refseq_clean),
-  mart       = ensembl
+  filters = "refseq_mrna",
+  values = unique(refseq_clean),
+  mart = ensembl
 )
 
 annot <- annot[annot$hgnc_symbol != "", ]
@@ -63,7 +113,6 @@ top10 <- df_sig[1:10, ]
 # -------------------------
 p <- ggplot(df, aes(logFC, neglog10_padj, color = status)) +
   geom_point(size = 1.2) +
-  
   geom_text_repel(
     data = top10,
     aes(label = gene_symbol),
@@ -73,16 +122,13 @@ p <- ggplot(df, aes(logFC, neglog10_padj, color = status)) +
     point.padding = 0.3,
     segment.color = "grey50"
   ) +
-  
   scale_color_manual(values = c(
     "Up in Sedentary" = "#d62728",
     "Up in Active" = "#1f77b4",
     "Not significant" = "grey70"
   )) +
-  
   geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
   geom_vline(xintercept = 0, linetype = "dashed") +
-  
   theme_classic(base_size = 14) +
   labs(
     title = "Volcano plot (linear model corrected by PC1 + PC2)",
@@ -96,6 +142,16 @@ p <- ggplot(df, aes(logFC, neglog10_padj, color = status)) +
 # -------------------------
 # SAVE
 # -------------------------
-png("volcano_PC1_PC2_labeled.png", width = 2100, height = 1500, res = 300, type = "cairo", bg = "white")
+png(
+  out_png,
+  width = 2100,
+  height = 1500,
+  res = 300,
+  type = "cairo",
+  bg = "white"
+)
+
 print(p)
 dev.off()
+
+cat("Volcano plot written to:", out_png, "\n")

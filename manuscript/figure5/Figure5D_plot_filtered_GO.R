@@ -1,15 +1,27 @@
-# ============================================================
-# plot_filtered_union_GO.R
+#!/usr/bin/env Rscript
+
+############################################################
+# Figure 5D – Filtered GO enrichment plot
+#
 # Description:
-# Generates a filtered and publication-ready GO bubble plot
-# for the union of coherent miRNA–mRNA predicted target genes.
-# Only biologically interpretable GO terms relevant to the
-# study narrative are retained for visualization.
-# Input:
-#   ../output/union_coherent_GO.tsv
-# Output:
-#   ../plots/Figure5c_filtered_union_GO.png
-# ============================================================
+# This script generates a filtered and publication-ready GO
+# bubble plot for the union of coherent miRNA–mRNA predicted
+# target genes. Only biologically interpretable GO terms relevant
+# to the study narrative are retained for visualization.
+#
+# Inputs:
+# - GO enrichment TSV file
+# - Output PNG file
+#
+# Outputs:
+# - Filtered GO enrichment bubble plot PNG
+#
+# Usage:
+# Rscript Figure5D_plot_filtered_GO.R \
+#   union_coherent_GO.tsv \
+#   Figure5D_filtered_union_GO.png
+#
+############################################################
 
 suppressPackageStartupMessages({
   library(readr)
@@ -18,12 +30,47 @@ suppressPackageStartupMessages({
   library(stringr)
 })
 
-go_file <- "/mnt/beegfs/home/npoblete/sarcopipe/bin/module_3_analysis/v2/output/union_coherent_GO.tsv"
-go_plot <- "/mnt/beegfs/home/npoblete/sarcopipe/bin/module_3_analysis/v2/plots/Figure5c_filtered_union_GO.png"
+args <- commandArgs(trailingOnly = TRUE)
 
+if (length(args) < 2) {
+  stop(
+    "Usage: Rscript Figure5D_plot_filtered_GO.R ",
+    "<union_coherent_GO.tsv> <output.png>",
+    call. = FALSE
+  )
+}
+
+go_file <- args[1]
+go_plot <- args[2]
+
+if (!file.exists(go_file)) {
+  stop("Input GO TSV not found: ", go_file, call. = FALSE)
+}
+
+out_dir <- dirname(go_plot)
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+}
+
+# -------------------------
+# LOAD DATA
+# -------------------------
 go <- read_tsv(go_file, show_col_types = FALSE)
 
-# términos a conservar
+required_cols <- c("Description", "GeneRatio", "Count", "p.adjust")
+missing_cols <- setdiff(required_cols, colnames(go))
+
+if (length(missing_cols) > 0) {
+  stop(
+    "Input GO TSV is missing required columns: ",
+    paste(missing_cols, collapse = ", "),
+    call. = FALSE
+  )
+}
+
+# -------------------------
+# FILTER TERMS
+# -------------------------
 keep_terms <- c(
   "regulation of lymphocyte migration",
   "lymphocyte migration",
@@ -38,15 +85,26 @@ keep_terms <- c(
 go2 <- go %>%
   filter(Description %in% keep_terms) %>%
   mutate(
-    GeneRatio_num = sapply(strsplit(GeneRatio, "/"), function(x) as.numeric(x[1]) / as.numeric(x[2])),
+    GeneRatio_num = sapply(
+      strsplit(GeneRatio, "/"),
+      function(x) as.numeric(x[1]) / as.numeric(x[2])
+    ),
     Description_wrapped = str_wrap(Description, width = 38)
   ) %>%
   arrange(GeneRatio_num)
 
-# ordenar eje Y
-go2$Description_wrapped <- factor(go2$Description_wrapped, levels = go2$Description_wrapped)
+go2$Description_wrapped <- factor(
+  go2$Description_wrapped,
+  levels = go2$Description_wrapped
+)
 
-p <- ggplot(go2, aes(x = GeneRatio_num, y = Description_wrapped, size = Count, color = p.adjust)) +
+# -------------------------
+# PLOT
+# -------------------------
+p <- ggplot(
+  go2,
+  aes(x = GeneRatio_num, y = Description_wrapped, size = Count, color = p.adjust)
+) +
   geom_point(alpha = 0.95) +
   scale_color_gradient(
     low = "#C94C4C",
@@ -70,4 +128,9 @@ p <- ggplot(go2, aes(x = GeneRatio_num, y = Description_wrapped, size = Count, c
     panel.grid.minor = element_blank()
   )
 
+# -------------------------
+# SAVE
+# -------------------------
 ggsave(go_plot, p, width = 11, height = 5.5, dpi = 300)
+
+cat("Filtered GO plot written to:", go_plot, "\n")

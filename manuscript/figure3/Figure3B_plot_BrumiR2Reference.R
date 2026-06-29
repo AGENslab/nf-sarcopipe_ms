@@ -1,53 +1,52 @@
 #!/usr/bin/env Rscript
 
-# ============================================================
-# plot_figure2D_passfail_by_group.R
-# ============================================================
+############################################################
+# Figure 3B – BrumiR2Reference support by group
 #
 # Description:
-# This script plots the number of supported and not-supported BrumiR core
-# candidates across biological groups using a stacked barplot.
-#
-# It expects a TSV file containing at least:
-# - group
-# - metric
-# - count
-#
-# Only the following metric values are plotted:
-# - supported
-# - not_supported
-#
-# Expected group levels:
-# - athlete
-# - sedentary
-# - shared
+# This script plots the number of supported and not-supported
+# BrumiR core candidates across biological groups using a
+# stacked barplot.
 #
 # Inputs:
-#   1. input TSV
-#   2. output PNG
-#   3. plot title
+# - TSV file containing columns: group, metric, count
+# - Output PNG file
+# - Plot title
 #
-# Output:
-# - A stacked barplot PNG showing supported vs not-supported candidates by group
-# ============================================================
+# Outputs:
+# - A stacked barplot PNG showing supported vs not-supported
+#   candidates by group
+#
+# Usage:
+# Rscript Figure3B_plot_BrumiR2Reference.R \
+#   <input.tsv> \
+#   <output.png> \
+#   <title>
+#
+############################################################
 
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 3) {
   cat(
     "Usage:\n",
-    "  Rscript plot_figure2D_passfail_by_group.R <input.tsv> <output.png> <title>\n",
+    "  Rscript Figure3B_plot_BrumiR2Reference.R <input.tsv> <output.png> <title>\n",
     sep = ""
   )
   quit(status = 1)
 }
 
-in_tsv  <- args[1]
+in_tsv <- args[1]
 out_png <- args[2]
-ttl     <- args[3]
+ttl <- args[3]
 
 if (!file.exists(in_tsv)) {
-  stop("Input TSV not found: ", in_tsv)
+  stop("Input TSV not found: ", in_tsv, call. = FALSE)
+}
+
+out_dir <- dirname(out_png)
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 }
 
 df <- read.table(
@@ -59,20 +58,25 @@ df <- read.table(
 
 required_cols <- c("group", "metric", "count")
 missing_cols <- setdiff(required_cols, colnames(df))
+
 if (length(missing_cols) > 0) {
   stop(
     "Input TSV is missing required columns: ",
-    paste(missing_cols, collapse = ", ")
+    paste(missing_cols, collapse = ", "),
+    call. = FALSE
   )
 }
 
 sub <- df[df$metric %in% c("supported", "not_supported"), , drop = FALSE]
 
 if (nrow(sub) == 0) {
-  stop("No rows found with metric values 'supported' or 'not_supported'.")
+  stop(
+    "No rows found with metric values 'supported' or 'not_supported'.",
+    call. = FALSE
+  )
 }
 
-sub$group  <- factor(sub$group,  levels = c("athlete", "sedentary", "shared"))
+sub$group <- factor(sub$group, levels = c("athlete", "sedentary", "shared"))
 sub$metric <- factor(sub$metric, levels = c("supported", "not_supported"))
 
 png(out_png, width = 1400, height = 900, res = 150)
@@ -93,7 +97,6 @@ bp <- barplot(
 
 tot <- colSums(mat)
 
-# Total above each bar
 text(
   bp,
   tot + max(tot) * 0.03,
@@ -101,7 +104,6 @@ text(
   cex = 1
 )
 
-# Supported counts (dark grey)
 text(
   bp,
   mat[1, ] / 2,
@@ -110,7 +112,6 @@ text(
   cex = 0.9
 )
 
-# Not-supported counts (light grey)
 text(
   bp,
   mat[1, ] + mat[2, ] / 2,

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-make_cdhit_supp_table.py
+Figure S1A – Generate CD-HIT supplementary summary table
 
+Description
+-----------
 Build a compact supplementary summary table from CD-HIT cluster statistics
 and BrumiR core-set outputs.
 
-Purpose
--------
 For each CD-HIT identity threshold, this script combines:
 1) the cluster-size distribution summary
 2) the athlete/sedentary core-set membership table
@@ -21,84 +21,94 @@ It reports:
 - shared core size
 - union core size
 
-Expected inputs
----------------
-Summary TSV columns:
-- status
-- identity
-- count_in_n_samples
-- n_clusters
-
-Core-sets TSV columns:
-- set
-- miRNA
-
-Output
+Inputs
 ------
+1) CD-HIT summary TSV with columns:
+   - status
+   - identity
+   - count_in_n_samples
+   - n_clusters
+
+2) Core-sets TSV with columns:
+   - set
+   - miRNA
+
+Outputs
+-------
 A single TSV summarizing all requested CD-HIT identity thresholds.
+
+Usage
+-----
+python FigureS1A_generate_summary_table.py \\
+  --rows \\
+    0.85,path/to/summary_085.tsv,path/to/core_sets_085.tsv \\
+    0.90,path/to/summary_090.tsv,path/to/core_sets_090.tsv \\
+    0.95,path/to/summary_095.tsv,path/to/core_sets_095.tsv \\
+  --out path/to/FigureS1A_summary_table.tsv
 """
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 
 
-def read_summary_tsv(path):
+def validate_input_file(path: Path, label: str) -> None:
+    """Validate that an input file exists."""
+    if not path.exists():
+        sys.exit(f"ERROR: {label} file not found: {path}")
+    if not path.is_file():
+        sys.exit(f"ERROR: {label} path is not a file: {path}")
+
+
+def read_summary_tsv(path: Path):
     """
     Read a CD-HIT cluster summary TSV.
-
-    Expected columns:
-    - status
-    - identity
-    - count_in_n_samples
-    - n_clusters
 
     Returns
     -------
     total : int
-        Total number of clusters
     singletons : int
-        Number of clusters present in exactly 1 sample
     ubiquitous : int
-        Number of clusters present in exactly 25 samples
     wmed : int or None
-        Weighted median of number of samples per cluster
     """
     dist = {}
     total = 0
 
-    with open(path, "r", newline="") as f:
-        reader = csv.DictReader(f, delimiter="\t")
+    with path.open("r", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+
+        required_columns = {"status", "identity", "count_in_n_samples", "n_clusters"}
+        missing = required_columns - set(reader.fieldnames or [])
+        if missing:
+            sys.exit(f"ERROR: Missing columns in {path}: {', '.join(sorted(missing))}")
+
         for row in reader:
-            n = int(row["count_in_n_samples"])
-            c = int(row["n_clusters"])
-            dist[n] = c
-            total += c
+            n_samples = int(row["count_in_n_samples"])
+            n_clusters = int(row["n_clusters"])
+            dist[n_samples] = n_clusters
+            total += n_clusters
 
     half = total / 2.0
-    cum = 0
-    wmed = None
+    cumulative = 0
+    weighted_median = None
 
-    # Keeps original logic: assumes sample-count support is evaluated from 1 to 25
-    for n in range(1, 26):
-        cum += dist.get(n, 0)
-        if wmed is None and cum >= half:
-            wmed = n
+    # Original logic preserved: sample-count support is evaluated from 1 to 25.
+    for n_samples in range(1, 26):
+        cumulative += dist.get(n_samples, 0)
+        if weighted_median is None and cumulative >= half:
+            weighted_median = n_samples
             break
 
     singletons = dist.get(1, 0)
     ubiquitous = dist.get(25, 0)
 
-    return total, singletons, ubiquitous, wmed
+    return total, singletons, ubiquitous, weighted_median
 
 
-def read_core_sets(path):
+def read_core_sets(path: Path):
     """
     Read a core-set TSV and compute athlete/sedentary overlap statistics.
-
-    Expected columns:
-    - set
-    - miRNA
 
     Returns
     -------
@@ -110,30 +120,51 @@ def read_core_sets(path):
     athlete = set()
     sedentary = set()
 
-    with open(path, "r", newline="") as f:
-        reader = csv.DictReader(f, delimiter="\t")
+    with path.open("r", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+
+        required_columns = {"set", "miRNA"}
+        missing = required_columns - set(reader.fieldnames or [])
+        if missing:
+            sys.exit(f"ERROR: Missing columns in {path}: {', '.join(sorted(missing))}")
+
         for row in reader:
             if row["set"] == "athlete_core":
                 athlete.add(row["miRNA"])
             elif row["set"] == "sedentary_core":
                 sedentary.add(row["miRNA"])
 
-    inter = athlete & sedentary
+    shared = athlete & sedentary
     union = athlete | sedentary
 
-    return len(athlete), len(sedentary), len(inter), len(union)
+    return len(athlete), len(sedentary), len(shared), len(union)
 
 
-def pct(x, denom):
+def pct(value: int, denominator: int) -> float:
     """Return percentage, guarding against division by zero."""
-    return 100.0 * x / denom if denom else 0.0
+    return 100.0 * value / denominator if denominator else 0.0
+
+
+def parse_row_spec(spec: str):
+    """Parse one --rows entry formatted as identity,summary_tsv,core_sets_tsv."""
+    fields = [field.strip() for field in spec.split(",")]
+
+    if len(fields) != 3:
+        sys.exit(
+            "ERROR: Each --rows entry must have exactly three comma-separated fields: "
+            "identity,summary_tsv,core_sets_tsv. "
+            f"Invalid entry: {spec}"
+        )
+
+    identity, summary_path, core_path = fields
+    return identity, Path(summary_path), Path(core_path)
 
 
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Build a supplementary summary table from CD-HIT cluster summaries "
-            "and BrumiR core-set tables."
+            "Build Figure S1A supplementary summary table from CD-HIT cluster "
+            "summaries and BrumiR core-set tables."
         )
     )
     parser.add_argument(
@@ -141,18 +172,21 @@ def main():
         nargs="+",
         required=True,
         help=(
-            "Each row must be provided as: "
-            "identity,summary_tsv,core_sets_tsv "
-            "Example: "
-            "0.95,results/clustering/0.95/all.0.95.cdhit_summary.tsv,"
+            "Rows formatted as identity,summary_tsv,core_sets_tsv. "
+            "Example: 0.95,results/clustering/0.95/all.0.95.cdhit_summary.tsv,"
             "results/clustering/0.95/brumir.0.95.core_sets.tsv"
         ),
     )
-    parser.add_argument("--out", required=True, help="Output TSV path")
+    parser.add_argument(
+        "--out",
+        required=True,
+        help="Output TSV path.",
+    )
+
     args = parser.parse_args()
 
-    outp = Path(args.out)
-    outp.parent.mkdir(parents=True, exist_ok=True)
+    output_path = Path(args.out)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     header = [
         "cdhit_identity",
@@ -168,35 +202,39 @@ def main():
         "core_union_n",
     ]
 
-    rows_out = []
+    output_rows = []
 
-    for spec in args.rows:
-        ident, summary_path, core_path = [x.strip() for x in spec.split(",")]
+    for row_spec in args.rows:
+        identity, summary_path, core_path = parse_row_spec(row_spec)
 
-        total, s1, u25, wmed = read_summary_tsv(summary_path)
-        a, s, inter, union = read_core_sets(core_path)
+        validate_input_file(summary_path, "Summary TSV")
+        validate_input_file(core_path, "Core-sets TSV")
 
-        rows_out.append({
-            "cdhit_identity": ident,
-            "total_clusters": str(total),
-            "singletons_n1": str(s1),
-            "singletons_pct": f"{pct(s1, total):.1f}",
-            "ubiquitous_n25": str(u25),
-            "ubiquitous_pct": f"{pct(u25, total):.1f}",
-            "weighted_median_samples_per_cluster": str(wmed),
-            "athlete_core_n": str(a),
-            "sedentary_core_n": str(s),
-            "shared_core_n": str(inter),
-            "core_union_n": str(union),
-        })
+        total, singletons, ubiquitous, weighted_median = read_summary_tsv(summary_path)
+        athlete_n, sedentary_n, shared_n, union_n = read_core_sets(core_path)
 
-    with open(outp, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=header, delimiter="\t")
+        output_rows.append(
+            {
+                "cdhit_identity": identity,
+                "total_clusters": str(total),
+                "singletons_n1": str(singletons),
+                "singletons_pct": f"{pct(singletons, total):.1f}",
+                "ubiquitous_n25": str(ubiquitous),
+                "ubiquitous_pct": f"{pct(ubiquitous, total):.1f}",
+                "weighted_median_samples_per_cluster": str(weighted_median),
+                "athlete_core_n": str(athlete_n),
+                "sedentary_core_n": str(sedentary_n),
+                "shared_core_n": str(shared_n),
+                "core_union_n": str(union_n),
+            }
+        )
+
+    with output_path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=header, delimiter="\t")
         writer.writeheader()
-        for row in rows_out:
-            writer.writerow(row)
+        writer.writerows(output_rows)
 
-    print(f"OK - wrote {outp}")
+    print(f"OK - wrote {output_path}")
 
 
 if __name__ == "__main__":

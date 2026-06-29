@@ -1,17 +1,24 @@
-# ============================================================
-# plot_prioritized_predicted_target_genes.R
+#!/usr/bin/env Rscript
+
+############################################################
+# Figure S4B – Prioritized predicted target genes
+#
 # Description:
 # Generates a publication-ready plot of prioritized predicted
 # target genes based on coherent miRNA support, number of
-# seed-matched sites, and miRNA effect size. Intended for
-# Figure 5d.
+# seed-matched sites, and miRNA effect size.
 #
-# Input:
-#   ../output/prioritized_predicted_target_genes_top15.tsv
+# Inputs:
+# 1) prioritized_predicted_target_genes_top15.tsv
 #
-# Output:
-#   ../plots/Figure5d_prioritized_predicted_targets.png
-# ============================================================
+# Outputs:
+# - FigureS4B_prioritized_predicted_targets.png
+#
+# Usage:
+# Rscript FigureS4B_plot_prioritized_targets.R \
+#   <prioritized_predicted_target_genes_top15.tsv> \
+#   <FigureS4B_prioritized_predicted_targets.png>
+############################################################
 
 suppressPackageStartupMessages({
   library(readr)
@@ -20,10 +27,45 @@ suppressPackageStartupMessages({
   library(stringr)
 })
 
-infile <- "/mnt/beegfs/home/npoblete/sarcopipe/bin/module_3_analysis/v2/output/prioritized_predicted_target_genes_top15.tsv"
-outfile <- "/mnt/beegfs/home/npoblete/sarcopipe/bin/module_3_analysis/v2/plots/Figure5d_prioritized_predicted_targets.png"
+args <- commandArgs(trailingOnly = TRUE)
+
+if (length(args) < 2) {
+  stop(
+    "Usage: Rscript FigureS4B_plot_prioritized_targets.R ",
+    "<prioritized_predicted_target_genes_top15.tsv> ",
+    "<FigureS4B_prioritized_predicted_targets.png>"
+  )
+}
+
+infile <- args[1]
+outfile <- args[2]
+
+if (!file.exists(infile)) {
+  stop("Input prioritized target table not found: ", infile)
+}
+
+out_dir <- dirname(outfile)
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 df <- read_tsv(infile, show_col_types = FALSE)
+
+required_cols <- c(
+  "gene_symbol",
+  "category",
+  "priority_score",
+  "total_n_sites"
+)
+
+missing_cols <- setdiff(required_cols, colnames(df))
+
+if (length(missing_cols) > 0) {
+  stop(
+    "Missing required columns in input table: ",
+    paste(missing_cols, collapse = ", ")
+  )
+}
 
 df <- df %>%
   mutate(
@@ -31,7 +73,15 @@ df <- df %>%
     category = factor(category, levels = c("shared", "BrumiR_only", "miRDeep2_only"))
   )
 
-p <- ggplot(df, aes(x = priority_score, y = gene_symbol, color = category, size = total_n_sites)) +
+p <- ggplot(
+  df,
+  aes(
+    x = priority_score,
+    y = gene_symbol,
+    color = category,
+    size = total_n_sites
+  )
+) +
   geom_point(alpha = 0.95) +
   scale_color_manual(values = c(
     "shared" = "#7A4EAB",
@@ -52,4 +102,12 @@ p <- ggplot(df, aes(x = priority_score, y = gene_symbol, color = category, size 
     legend.title = element_text(face = "bold")
   )
 
-ggsave(outfile, p, width = 9, height = 6, dpi = 300)
+ggsave(
+  outfile,
+  p,
+  width = 9,
+  height = 6,
+  dpi = 300
+)
+
+cat("Prioritized target plot written to:", outfile, "\n")

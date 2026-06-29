@@ -1,49 +1,124 @@
 #!/usr/bin/env python3
-# ============================================================
-# extract_mirdeep2_core941_fasta_from_miRBase.py
-# Description:
-# Extracts mature sequences from the human miRBase FASTA for
-# the unique miRDeep2 p0.8 core miRNA IDs.
-#
-# Inputs:
-#   - overlap_miRGeneDB/md_p08_unique_ids.txt
-#   - /mnt/beegfs/home/npoblete/databases/miRBase/hsa/hsa_mature.mirdeep2.OK.fa
-#
-# Output:
-#   - overlap_miRGeneDB/md_p08_unique_sequences.fa
-# ============================================================
 
+"""
+Figure 3C – Extract miRDeep2 core sequences from miRBase
+
+Description
+-----------
+This script extracts mature miRNA sequences from a human miRBase
+FASTA file for the unique miRDeep2 p=0.8 core miRNA IDs.
+
+Inputs
+------
+--ids
+    Text file containing unique miRDeep2 miRNA IDs, one per line.
+
+--ref_fasta
+    Human miRBase mature FASTA file.
+
+--out_fasta
+    Output FASTA file.
+
+Outputs
+-------
+FASTA file containing mature miRBase sequences for the requested
+miRDeep2 core miRNA IDs.
+
+Usage
+-----
+python3 Figure3C_extract_miRDeep2_miRBase.py \\
+  --ids md_p08_unique_ids.txt \\
+  --ref_fasta hsa_mature.mirdeep2.OK.fa \\
+  --out_fasta md_p08_unique_sequences.fa
+"""
+
+import argparse
 from pathlib import Path
 
-ids_file = Path("/mnt/beegfs/home/npoblete/sarcopipe/bin/module_3_analysis/v2/scripts/overlap_miRGeneDB/md_p08_unique_ids.txt")
-ref_fasta = Path("/mnt/beegfs/home/npoblete/databases/miRBase/hsa/hsa_mature.mirdeep2.OK.fa")
-out_fasta = Path("/mnt/beegfs/home/npoblete/sarcopipe/bin/module_3_analysis/v2/scripts/overlap_miRGeneDB/md_p08_unique_sequences.fa")
 
-wanted = set(x.strip() for x in ids_file.read_text().splitlines() if x.strip())
+def validate_file(path: str, label: str) -> Path:
+    """Validate that an input file exists."""
+    file_path = Path(path)
 
-header = None
-seq = []
-keep = False
-written = 0
+    if not file_path.is_file():
+        raise SystemExit(f"ERROR: {label} not found: {file_path}")
 
-with ref_fasta.open() as f, out_fasta.open("w") as out:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        if line.startswith(">"):
-            if header is not None and keep:
-                out.write(f">{header}\n{''.join(seq)}\n")
-                written += 1
-            header = line[1:].split()[0]
-            keep = header in wanted
-            seq = []
-        else:
-            seq.append(line)
-    if header is not None and keep:
-        out.write(f">{header}\n{''.join(seq)}\n")
-        written += 1
+    return file_path
 
-print("Requested IDs:", len(wanted))
-print("Written sequences:", written)
-print("Output:", out_fasta)
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Extract miRDeep2 core mature sequences from miRBase FASTA."
+    )
+
+    parser.add_argument(
+        "--ids",
+        required=True,
+        help="Text file containing unique miRDeep2 miRNA IDs.",
+    )
+    parser.add_argument(
+        "--ref_fasta",
+        required=True,
+        help="Human miRBase mature FASTA file.",
+    )
+    parser.add_argument(
+        "--out_fasta",
+        required=True,
+        help="Output FASTA file.",
+    )
+
+    return parser.parse_args()
+
+
+def main() -> None:
+    """Extract mature miRNA sequences from miRBase FASTA."""
+    args = parse_args()
+
+    ids_file = validate_file(args.ids, "miRNA ID file")
+    ref_fasta = validate_file(args.ref_fasta, "miRBase mature FASTA")
+    out_fasta = Path(args.out_fasta)
+
+    out_fasta.parent.mkdir(parents=True, exist_ok=True)
+
+    wanted = {
+        line.strip()
+        for line in ids_file.read_text().splitlines()
+        if line.strip()
+    }
+
+    header = None
+    sequence_parts = []
+    keep = False
+    written = 0
+
+    with ref_fasta.open() as fasta_handle, out_fasta.open("w") as out_handle:
+        for raw_line in fasta_handle:
+            line = raw_line.strip()
+
+            if not line:
+                continue
+
+            if line.startswith(">"):
+                if header is not None and keep:
+                    out_handle.write(f">{header}\n{''.join(sequence_parts)}\n")
+                    written += 1
+
+                header = line[1:].split()[0]
+                keep = header in wanted
+                sequence_parts = []
+
+            else:
+                sequence_parts.append(line)
+
+        if header is not None and keep:
+            out_handle.write(f">{header}\n{''.join(sequence_parts)}\n")
+            written += 1
+
+    print("Requested IDs:", len(wanted))
+    print("Written sequences:", written)
+    print("Output:", out_fasta)
+
+
+if __name__ == "__main__":
+    main()

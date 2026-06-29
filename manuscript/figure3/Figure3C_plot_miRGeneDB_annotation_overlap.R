@@ -1,20 +1,76 @@
-# ============================================================
-# Figure: miRNA annotation and overlap between BrumiR and miRDeep2
-# ============================================================
+#!/usr/bin/env Rscript
 
-library(ggplot2)
-library(dplyr)
+############################################################
+# Figure 3C – miRGeneDB annotation overlap
+#
+# Description:
+# This script generates a barplot showing miRNA annotation and
+# overlap between BrumiR and miRDeep2 based on miRGeneDB matches.
+# Counts are manually defined from the annotation summary.
+#
+# Inputs:
+# - Output prefix
+#
+# Outputs:
+# - <out_prefix>.png
+# - <out_prefix>.pdf
+#
+# Usage:
+# Rscript Figure3C_plot_miRGeneDB_annotation_overlap.R \
+#   Figure_miRGeneDB_annotation_overlap_clean
+#
+############################################################
+
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(dplyr)
+})
+
+args <- commandArgs(trailingOnly = TRUE)
+
+if (length(args) < 1) {
+  stop(
+    "Usage: Rscript Figure3C_plot_miRGeneDB_annotation_overlap.R <out_prefix>",
+    call. = FALSE
+  )
+}
+
+out_prefix <- args[1]
+
+out_png <- paste0(out_prefix, ".png")
+out_pdf <- paste0(out_prefix, ".pdf")
+
+out_dir <- dirname(out_png)
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 df <- data.frame(
-  algorithm = c("BrumiR", "BrumiR",
-                "miRDeep2", "miRDeep2", "miRDeep2"),
-  category = c("Shared annotated", "Putative novel",
-               "Shared annotated", "Unique annotated", "Putative novel"),
-  count = c(141, 79,
-            141, 238, 562)
+  algorithm = c(
+    "BrumiR",
+    "BrumiR",
+    "miRDeep2",
+    "miRDeep2",
+    "miRDeep2"
+  ),
+  category = c(
+    "Shared annotated",
+    "Putative novel",
+    "Shared annotated",
+    "Unique annotated",
+    "Putative novel"
+  ),
+  count = c(
+    141,
+    79,
+    141,
+    238,
+    562
+  )
 )
 
 df$algorithm <- factor(df$algorithm, levels = c("miRDeep2", "BrumiR"))
+
 df$category <- factor(
   df$category,
   levels = c("Shared annotated", "Unique annotated", "Putative novel")
@@ -54,7 +110,7 @@ p <- ggplot(df, aes(x = algorithm, y = count, fill = category)) +
 print(p)
 
 ggsave(
-  "Figure_miRGeneDB_annotation_overlap_clean.png",
+  out_png,
   p,
   width = 8,
   height = 4.8,
@@ -63,9 +119,12 @@ ggsave(
 )
 
 ggsave(
-  "Figure_miRGeneDB_annotation_overlap_clean.pdf",
+  out_pdf,
   p,
   width = 8,
   height = 4.8,
   bg = "white"
 )
+
+cat("Plot written to:", out_png, "\n")
+cat("Plot written to:", out_pdf, "\n")

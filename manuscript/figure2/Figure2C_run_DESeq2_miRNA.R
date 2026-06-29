@@ -1,31 +1,38 @@
 #!/usr/bin/env Rscript
 
-# ============================================================
-# run_deseq2_mirna.R
-# ============================================================
+############################################################
+# Figure 2C – DESeq2 differential expression for miRNAs
 #
 # Description:
-# This script performs differential expression analysis for miRNA count matrices
-# using DESeq2. It is designed to run two analyses in one execution:
-#   1) BrumiR count matrix
-#   2) miRDeep2 count matrix
+# Performs differential expression analysis for miRNA count
+# matrices using DESeq2. The script runs two analyses:
+#
+# 1. BrumiR count matrix
+# 2. miRDeep2 count matrix
 #
 # Inputs:
-#   --brumir_counts   TSV file with BrumiR counts
-#   --mirdeep2_counts TSV file with miRDeep2 counts
-#   --sample_info     TSV file with sample metadata
-#   --outdir          Output directory
+# --brumir_counts    TSV file with BrumiR counts
+# --mirdeep2_counts  TSV file with miRDeep2 counts
+# --sample_info      TSV file with sample metadata
+# --outdir           Output directory
 #
 # Expected sample_info columns:
-#   - sample
-#   - condition
+# - sample
+# - condition
 #
-# Notes:
-# - The first level in the condition factor is used as reference.
-# - The second level is used as the comparison group.
-# - The script writes full DESeq2 results, significant results,
-#   significant results with abs(log2FC) >= 1, and VST matrices.
-# ============================================================
+# Outputs:
+# - Full DESeq2 results
+# - Significant results with adjusted p-value < 0.05
+# - Significant results with adjusted p-value < 0.05 and abs(log2FC) >= 1
+# - VST-normalized matrices
+#
+# Usage:
+# Rscript Figure2C_run_DESeq2_miRNA.R \
+#   --brumir_counts brumir.counts.tsv \
+#   --mirdeep2_counts miRDeep2.counts.tsv \
+#   --sample_info sample_info.tsv \
+#   --outdir results_dir
+############################################################
 
 args <- commandArgs(trailingOnly = TRUE)
 
@@ -69,7 +76,7 @@ if (is.null(opt$brumir_counts) || is.null(opt$mirdeep2_counts) || is.null(opt$sa
   stop(
     paste(
       "Usage:",
-      "Rscript run_deseq2_mirna.R",
+      "Rscript Figure2C_run_DESeq2_miRNA.R",
       "--brumir_counts brumir.counts.tsv",
       "--mirdeep2_counts miRDeep2.counts.tsv",
       "--sample_info sample_info.tsv",
@@ -78,6 +85,20 @@ if (is.null(opt$brumir_counts) || is.null(opt$mirdeep2_counts) || is.null(opt$sa
     )
   )
 }
+
+if (!file.exists(opt$brumir_counts)) {
+  stop("BrumiR counts file not found: ", opt$brumir_counts)
+}
+
+if (!file.exists(opt$mirdeep2_counts)) {
+  stop("miRDeep2 counts file not found: ", opt$mirdeep2_counts)
+}
+
+if (!file.exists(opt$sample_info)) {
+  stop("Sample metadata file not found: ", opt$sample_info)
+}
+
+dir.create(opt$outdir, showWarnings = FALSE, recursive = TRUE)
 
 suppressPackageStartupMessages({
   library(DESeq2)
@@ -97,11 +118,9 @@ run_one_deseq <- function(counts_file, sample_file, out_prefix) {
     )
   }
 
-  # first col = feature id
   rownames(counts) <- counts[[1]]
   counts <- counts[, -1, drop = FALSE]
 
-  # keep only shared samples, same order
   common <- intersect(colnames(counts), samples$sample)
   if (length(common) < 2) {
     stop("Fewer than 2 shared samples between counts and sample_info for: ", counts_file)
@@ -120,17 +139,15 @@ run_one_deseq <- function(counts_file, sample_file, out_prefix) {
   test_cond <- levels(samples$condition)[2]
   samples$condition <- relevel(samples$condition, ref = ref_cond)
 
-  # numeric matrix
   count_mat <- as.matrix(counts)
   mode(count_mat) <- "integer"
 
   dds <- DESeqDataSetFromMatrix(
     countData = count_mat,
-    colData   = samples,
-    design    = ~ condition
+    colData = samples,
+    design = ~ condition
   )
 
-  # minimal filtering
   dds <- dds[rowSums(counts(dds)) >= 10, ]
 
   dds <- DESeq(dds)
@@ -159,16 +176,14 @@ run_one_deseq <- function(counts_file, sample_file, out_prefix) {
   cat("Features tested:", nrow(dds), "\n")
 }
 
-dir.create(opt$outdir, showWarnings = FALSE, recursive = TRUE)
-
 run_one_deseq(
   counts_file = opt$brumir_counts,
   sample_file = opt$sample_info,
-  out_prefix  = file.path(opt$outdir, "brumir_deseq2")
+  out_prefix = file.path(opt$outdir, "brumir_deseq2")
 )
 
 run_one_deseq(
   counts_file = opt$mirdeep2_counts,
   sample_file = opt$sample_info,
-  out_prefix  = file.path(opt$outdir, "mirdeep2_deseq2")
+  out_prefix = file.path(opt$outdir, "mirdeep2_deseq2")
 )

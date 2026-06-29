@@ -1,18 +1,48 @@
 #!/usr/bin/env Rscript
 
-###############################################################
-# Script: go_kegg_manual_curated.R
+############################################################
+# Figure 4F – Manually curated GO/KEGG-like dotplot
+#
 # Description:
-# Manually curated GO/KEGG-like dotplot without clusterProfiler.
-# Uses selected biologically relevant pathways.
-###############################################################
+# This script generates a manually curated GO/KEGG-like dotplot
+# without clusterProfiler. It uses selected biologically relevant
+# pathways related to muscle, immune response, aging, and metabolism.
+#
+# Inputs:
+# - Output PNG file
+#
+# Outputs:
+# - GO_KEGG_manual_curated.png or user-defined output PNG
+#
+# Usage:
+# Rscript Figure4F_GO_KEGG_manual_curation.R \
+#   results/figures/GO_KEGG_manual_curated.png
+#
+############################################################
 
-library(ggplot2)
-library(stringr)
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(stringr)
+})
+
+args <- commandArgs(trailingOnly = TRUE)
+
+if (length(args) < 1) {
+  stop(
+    "Usage: Rscript Figure4F_GO_KEGG_manual_curation.R <output.png>",
+    call. = FALSE
+  )
+}
+
+out_png <- args[1]
+
+out_dir <- dirname(out_png)
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 # -------------------------
 # MANUAL CURATED TERMS
-# (basado en tu figura original, sin basura)
 # -------------------------
 df <- data.frame(
   Description = c(
@@ -29,14 +59,12 @@ df <- data.frame(
   ),
   GeneRatio = c(0.05, 0.045, 0.04, 0.038, 0.035, 0.033, 0.03, 0.028, 0.025, 0.022),
   Count = c(5, 4, 4, 3, 3, 3, 2, 2, 2, 2),
-  Type = c("KEGG","KEGG","KEGG","GO","GO","GO","GO","KEGG","GO","GO"),
+  Type = c("KEGG", "KEGG", "KEGG", "GO", "GO", "GO", "GO", "KEGG", "GO", "GO"),
   stringsAsFactors = FALSE
 )
 
-# wrap text
 df$Description <- str_wrap(df$Description, width = 40)
 
-# order
 df$Description <- factor(df$Description, levels = rev(df$Description))
 
 # -------------------------
@@ -62,13 +90,14 @@ p <- ggplot(df, aes(x = GeneRatio, y = Description, color = Type, size = Count))
 # SAVE
 # -------------------------
 png(
-  filename = "results/figures/GO_KEGG_manual_curated.png",
+  filename = out_png,
   width = 2600,
   height = 1800,
   res = 300,
   type = "cairo"
 )
+
 print(p)
 dev.off()
 
-cat("Manual curated plot saved\n")
+cat("Manual curated plot saved to:", out_png, "\n")

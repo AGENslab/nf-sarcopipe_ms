@@ -1,40 +1,60 @@
 #!/usr/bin/env Rscript
 
-############################
-# nf-core mRNA-seq downstream analysis
-# DESeq2 workflow
-# Author: NP
-############################
-
-# DESCRIPTION:
-# This script performs downstream differential expression analysis starting from
-# nf-core/rnaseq gene-level quantification files (quant.genes.sf).
+############################################################
+# Figure S3A/B – Raw mRNA-seq DESeq2 PCA and volcano
 #
-# REQUIRED INPUTS:
-#   --base_dir     Directory containing per-sample nf-core/rnaseq results
-#   --samplesheet  CSV/TSV with at least:
-#                    sample,condition
-#                  Optional column:
-#                    quant_file
-#   --outdir       Output directory
+# Description:
+# Performs downstream differential expression analysis from
+# nf-core/rnaseq gene-level quantification files.
 #
-# OPTIONAL INPUT:
-#   --quant_pattern  Relative path from base_dir to each quantification file.
-#                    Use "{sample}" as placeholder.
-#                    Default: "{sample}/quant.genes.sf"
+# The script builds a count matrix from quant.genes.sf files,
+# filters low-expression genes, runs DESeq2, annotates RefSeq
+# identifiers with gene symbols, exports normalized matrices,
+# and generates summary plots including volcano, PCA, heatmap,
+# and top-gene visualizations.
 #
-# EXAMPLE:
-#   Rscript run_nfcore_deseq2_downstream.R \
-#     --base_dir /path/to/nfcore/rnaseq/results/star_salmon \
-#     --samplesheet /path/to/samplesheet.tsv \
-#     --outdir paper_raw_mrna
+# Inputs:
+# --base_dir
+#     Directory containing per-sample nf-core/rnaseq results.
 #
-# NOTES:
-# - The samplesheet must contain a binary comparison in the column "condition".
-# - The first condition encountered is used as reference level.
-# - If "quant_file" is provided in the samplesheet, it is used directly.
-# - Otherwise, quant files are inferred as:
-#       file.path(base_dir, "{sample}/quant.genes.sf")
+# --samplesheet
+#     CSV/TSV with at least:
+#     - sample
+#     - condition
+#     Optional:
+#     - quant_file
+#
+# --outdir
+#     Output directory.
+#
+# --quant_pattern
+#     Relative path from base_dir to each quantification file.
+#     Use "{sample}" as placeholder.
+#     Default: "{sample}/quant.genes.sf"
+#
+# Outputs:
+# - tables/counts_raw_sin_filtrar_para_transparencia.csv
+# - tables/counts_filtrados_para_DESeq2.csv
+# - tables/resultados_DESeq2_refseq.csv
+# - tables/resultados_DESeq2_gene_symbol.csv
+# - tables/matriz_normalizada_para_modelos_nb.csv
+# - tables/para_correlacion_mirnas_matrix.csv
+# - tables/genes_significativos_FDR0.05_absLFC1.csv
+# - tables/top20_genes_mas_significativos.csv
+# - figures/resumen_genes_DE.png/pdf
+# - figures/volcano_plot_condition_comparison.png/pdf
+# - figures/barplot_top10_genes.png/pdf
+# - figures/PCA_top_variable_genes.png/pdf
+# - figures/heatmap_top_variable_genes.png/pdf
+# - objects/*.rds
+#
+# Usage:
+# Rscript FigureS3AB_raw_mRNAseq_DESeq2_PCA_volcano.R \
+#   --base_dir /path/to/star_salmon \
+#   --samplesheet /path/to/samplesheet.tsv \
+#   --outdir paper_raw_mrna \
+#   --quant_pattern "{sample}/quant.genes.sf"
+############################################################
 
 suppressPackageStartupMessages({
   library(DESeq2)
@@ -93,13 +113,21 @@ if (is.null(args$base_dir) || is.null(args$samplesheet)) {
     paste(
       "Missing required arguments.",
       "Usage:",
-      "Rscript run_nfcore_deseq2_downstream.R",
+      "Rscript FigureS3AB_raw_mRNAseq_DESeq2_PCA_volcano.R",
       "--base_dir /path/to/star_salmon",
       "--samplesheet /path/to/samplesheet.tsv",
       "--outdir paper_raw_mrna",
       sep = "\n"
     )
   )
+}
+
+if (!dir.exists(args$base_dir)) {
+  stop("Base directory not found: ", args$base_dir)
+}
+
+if (!file.exists(args$samplesheet)) {
+  stop("Samplesheet not found: ", args$samplesheet)
 }
 
 ############################
@@ -168,7 +196,7 @@ samples_df <- read_samplesheet(args$samplesheet)
 ############################
 
 build_quant_path <- function(base_dir, sample_name, quant_pattern) {
-  rel <- gsub("\\{sample\\}", sample_name, args$quant_pattern)
+  rel <- gsub("\\{sample\\}", sample_name, quant_pattern)
   file.path(base_dir, rel)
 }
 
@@ -199,6 +227,7 @@ coldata <- data.frame(
 ############################
 
 missing_files <- files[!file.exists(files)]
+
 if (length(missing_files) > 0) {
   stop("Missing input files:\n", paste(missing_files, collapse = "\n"))
 }
@@ -287,7 +316,10 @@ for (m in c("www", "uswest", "asia")) {
       mirror = m
     )
   }, silent = TRUE)
-  if (!is.null(ensembl)) break
+
+  if (!is.null(ensembl)) {
+    break
+  }
 }
 
 if (is.null(ensembl)) {
@@ -327,6 +359,7 @@ write.csv(
 cat("Exporting normalized matrices...\n")
 
 matriz_normalizada_para_modelos_nb <- counts(dds, normalized = TRUE)
+
 write.csv(
   matriz_normalizada_para_modelos_nb,
   file.path(tabledir, "matriz_normalizada_para_modelos_nb.csv")
@@ -378,7 +411,11 @@ genes_ref_up <- res_sig %>%
 n_total_DE <- nrow(res_sig)
 
 summary_df <- data.frame(
-  Group = c("Total DE genes", paste0("Up in ", condition_test), paste0("Up in ", condition_ref)),
+  Group = c(
+    "Total DE genes",
+    paste0("Up in ", condition_test),
+    paste0("Up in ", condition_ref)
+  ),
   Count = c(n_total_DE, length(genes_test_up), length(genes_ref_up))
 )
 
@@ -421,12 +458,25 @@ res_df$gene_symbol <- rownames(res_df)
 res_df$neglog10_padj <- -log10(res_df$padj)
 
 res_df$status <- "Not significant"
-res_df$status[!is.na(res_df$padj) & res_df$padj < 0.05 & res_df$log2FoldChange > 0] <- paste0("Up in ", condition_test)
-res_df$status[!is.na(res_df$padj) & res_df$padj < 0.05 & res_df$log2FoldChange < 0] <- paste0("Up in ", condition_ref)
+res_df$status[
+  !is.na(res_df$padj) &
+    res_df$padj < 0.05 &
+    res_df$log2FoldChange > 0
+] <- paste0("Up in ", condition_test)
+
+res_df$status[
+  !is.na(res_df$padj) &
+    res_df$padj < 0.05 &
+    res_df$log2FoldChange < 0
+] <- paste0("Up in ", condition_ref)
 
 res_df$status <- factor(
   res_df$status,
-  levels = c(paste0("Up in ", condition_test), paste0("Up in ", condition_ref), "Not significant")
+  levels = c(
+    paste0("Up in ", condition_test),
+    paste0("Up in ", condition_ref),
+    "Not significant"
+  )
 )
 
 top_genes <- res_df %>%
@@ -434,7 +484,10 @@ top_genes <- res_df %>%
   arrange(desc(neglog10_padj)) %>%
   head(10)
 
-p_volcano <- ggplot(res_df, aes(x = log2FoldChange, y = neglog10_padj, color = status)) +
+p_volcano <- ggplot(
+  res_df,
+  aes(x = log2FoldChange, y = neglog10_padj, color = status)
+) +
   geom_point(alpha = 0.6, size = 1.5) +
   geom_text_repel(
     data = top_genes,

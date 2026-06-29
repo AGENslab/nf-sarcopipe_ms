@@ -1,28 +1,44 @@
 #!/usr/bin/env Rscript
 
-################################################################################
-# Script: gene_reduction_barplot.R
+############################################################
+# Figure 4C – Gene reduction barplot
 #
 # Description:
-# This script generates a barplot summarizing the progressive reduction in the
-# number of candidate genes throughout the mRNA-seq analysis workflow.
+# This script generates a barplot summarizing the progressive
+# reduction in the number of candidate genes throughout the
+# mRNA-seq analysis workflow.
 #
-# Objective:
-# To illustrate how the initial set of expressed genes was reduced after
-# differential expression analysis before and after correction for PC1 and PC2.
+# Inputs:
+# - Output PNG file
 #
-# Methodological note:
-# A log10 scale is used on the y-axis to highlight the final reduced set of
-# candidate genes while preserving the large differences in magnitude across
-# analysis steps.
+# Outputs:
+# - gene_reduction_barplot.png or user-defined output PNG
 #
-# Output:
-# - gene_reduction_barplot.png
+# Usage:
+# Rscript Figure4C_gene_reduction_barplot.R \
+#   gene_reduction_barplot.png
 #
-# Author: Natalia Poblete
-################################################################################
+############################################################
 
-library(ggplot2)
+suppressPackageStartupMessages({
+  library(ggplot2)
+})
+
+args <- commandArgs(trailingOnly = TRUE)
+
+if (length(args) < 1) {
+  stop(
+    "Usage: Rscript Figure4C_gene_reduction_barplot.R <output.png>",
+    call. = FALSE
+  )
+}
+
+out_png <- args[1]
+
+out_dir <- dirname(out_png)
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 # -------------------------
 # DATA
@@ -38,7 +54,6 @@ df <- data.frame(
 
 df$step <- factor(df$step, levels = df$step)
 
-# custom label positions so the 36 is more visible
 df$label_y <- c(50000, 27000, 55)
 df$label_size <- c(5, 5, 6)
 
@@ -47,20 +62,16 @@ df$label_size <- c(5, 5, 6)
 # -------------------------
 p <- ggplot(df, aes(x = step, y = genes, fill = step)) +
   geom_bar(stat = "identity", width = 0.65) +
-  
   geom_text(
     aes(y = label_y, label = format(genes, big.mark = ",")),
     size = df$label_size,
     fontface = "bold"
   ) +
-  
   scale_fill_manual(values = c("#9ecae1", "#6baed6", "#de2d26")) +
-  
   scale_y_log10(
     breaks = c(10, 100, 1000, 10000, 50000),
     labels = c("10", "100", "1,000", "10,000", "50,000")
   ) +
-  
   theme_classic(base_size = 14) +
   labs(
     title = "Progressive reduction of candidate genes after confounding correction",
@@ -77,6 +88,16 @@ p <- ggplot(df, aes(x = step, y = genes, fill = step)) +
 # -------------------------
 # SAVE
 # -------------------------
-png("gene_reduction_barplot.png", width = 2200, height = 1400, res = 300, type = "cairo", bg = "white")
+png(
+  out_png,
+  width = 2200,
+  height = 1400,
+  res = 300,
+  type = "cairo",
+  bg = "white"
+)
+
 print(p)
 dev.off()
+
+cat("Gene reduction barplot written to:", out_png, "\n")

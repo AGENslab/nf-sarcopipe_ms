@@ -1,72 +1,107 @@
 #!/usr/bin/env Rscript
 
-# ============================================================
-# plot_figure2C_length_distribution.R
-# ============================================================
+############################################################
+# Figure S2A – Sequence length distribution
 #
 # Description:
-# This script compares the length distribution of BrumiR core candidate
+# Compares the length distribution of BrumiR core candidate
 # sequences and miRDeep2 known core sequences.
 #
-# It reads two FASTA files, computes sequence lengths, filters them to a user-
-# defined interval, writes a summary TSV, and generates a grouped barplot.
+# The script reads two FASTA files, computes sequence lengths,
+# filters them to a user-defined interval, writes a summary TSV,
+# and generates a grouped barplot.
 #
 # Inputs:
-#   1. BrumiR core FASTA
-#   2. miRDeep2 core FASTA
-#   3. output PNG
-#   4. output TSV
-#   5. plot title
-#   6. minimum sequence length
-#   7. maximum sequence length
+# 1) BrumiR core FASTA
+# 2) miRDeep2 core FASTA
+# 3) output PNG
+# 4) output TSV
+# 5) plot title
+# 6) minimum sequence length
+# 7) maximum sequence length
 #
 # Outputs:
 # - A TSV summarizing sequence counts per length
 # - A PNG grouped barplot of length distributions
-# ============================================================
+#
+# Usage:
+# Rscript FigureS2A_sequence_length_distribution.R \
+#   <brumir_fasta> <mirdeep2_fasta> <out_png> <out_tsv> \
+#   <title> <min_len> <max_len>
+############################################################
 
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 7) {
   cat(
     "Usage:\n",
-    "  Rscript plot_figure2C_length_distribution.R <brumir_fasta> <mirdeep2_fasta> <out_png> <out_tsv> <title> <min_len> <max_len>\n",
+    "  Rscript FigureS2A_sequence_length_distribution.R ",
+    "<brumir_fasta> <mirdeep2_fasta> <out_png> <out_tsv> ",
+    "<title> <min_len> <max_len>\n",
     sep = ""
   )
   quit(status = 1)
 }
 
-br_fa   <- args[1]
-md_fa   <- args[2]
+br_fa <- args[1]
+md_fa <- args[2]
 out_png <- args[3]
 out_tsv <- args[4]
-title   <- args[5]
+title <- args[5]
 min_len <- as.integer(args[6])
 max_len <- as.integer(args[7])
 
-stopifnot(file.exists(br_fa), file.exists(md_fa))
+if (!file.exists(br_fa)) {
+  stop("Input BrumiR FASTA not found: ", br_fa)
+}
+
+if (!file.exists(md_fa)) {
+  stop("Input miRDeep2 FASTA not found: ", md_fa)
+}
+
+if (is.na(min_len) || is.na(max_len)) {
+  stop("Minimum and maximum sequence lengths must be integers.")
+}
+
+if (min_len > max_len) {
+  stop("Minimum sequence length cannot be greater than maximum sequence length.")
+}
+
+out_png_dir <- dirname(out_png)
+out_tsv_dir <- dirname(out_tsv)
+
+if (!dir.exists(out_png_dir)) {
+  dir.create(out_png_dir, recursive = TRUE, showWarnings = FALSE)
+}
+
+if (!dir.exists(out_tsv_dir)) {
+  dir.create(out_tsv_dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 read_fasta_lengths <- function(path) {
-  x <- readLines(path, warn = FALSE)
-  lens <- integer(0)
-  cur <- ""
+  fasta_lines <- readLines(path, warn = FALSE)
+  lengths <- integer(0)
+  current_sequence <- ""
 
-  for (ln in x) {
-    if (startsWith(ln, ">")) {
-      if (nchar(cur) > 0) {
-        lens <- c(lens, nchar(cur))
-        cur <- ""
+  for (line in fasta_lines) {
+    if (startsWith(line, ">")) {
+      if (nchar(current_sequence) > 0) {
+        lengths <- c(lengths, nchar(current_sequence))
+        current_sequence <- ""
       }
     } else {
-      cur <- paste0(cur, gsub("[^ACGTUacgtu]", "", ln))
+      current_sequence <- paste0(
+        current_sequence,
+        gsub("[^ACGTUacgtu]", "", line)
+      )
     }
   }
 
-  if (nchar(cur) > 0) {
-    lens <- c(lens, nchar(cur))
+  if (nchar(current_sequence) > 0) {
+    lengths <- c(lengths, nchar(current_sequence))
   }
 
-  lens
+  lengths
 }
 
 br_len <- read_fasta_lengths(br_fa)
@@ -77,15 +112,15 @@ md_len <- md_len[md_len >= min_len & md_len <= max_len]
 
 lengths <- min_len:max_len
 
-count_vec <- function(v, lengths) {
-  tab <- table(factor(v, levels = lengths))
+count_vec <- function(values, lengths) {
+  tab <- table(factor(values, levels = lengths))
   as.integer(tab)
 }
 
 df <- data.frame(
   length = lengths,
   BrumiR_candidates = count_vec(br_len, lengths),
-  miRDeep2_known    = count_vec(md_len, lengths),
+  miRDeep2_known = count_vec(md_len, lengths),
   stringsAsFactors = FALSE
 )
 
@@ -103,7 +138,7 @@ png(out_png, width = 2400, height = 1800, res = 250, bg = "white")
 
 layout(matrix(c(1, 2), nrow = 2), heights = c(4.5, 1.5))
 
-col_brumir  <- "#5E3C99"
+col_brumir <- "#5E3C99"
 col_mirdeep <- "#1B9E77"
 
 # Panel 1: grouped bars
@@ -141,3 +176,6 @@ legend(
 )
 
 dev.off()
+
+cat("Length distribution plot written to:", out_png, "\n")
+cat("Length distribution table written to:", out_tsv, "\n")

@@ -1,128 +1,129 @@
 #!/usr/bin/env python3
 """
-venn_core_2set.py
+Figure 2B – Core miRNA overlap.
 
-Create a 2-set Venn diagram comparing athlete_core vs sedentary_core
-from a core-sets TSV file.
+Create a 2-set Venn diagram comparing active and sedentary miRNA core sets
+from a TSV file.
 
-Purpose
--------
-This script reads a table of core miRNA assignments and generates a PNG
-showing the overlap between:
-
-- athlete_core
-- sedentary_core
-
-Expected input format
----------------------
+Expected input
+--------------
 A TSV file with two columns:
 
     set    miRNA
 
-Example:
-
-    athlete_core    hsa-miR-1-3p
-    athlete_core    hsa-miR-133a-3p
-    sedentary_core  hsa-miR-1-3p
-
-Expected set names
-------------------
-The script expects the following set labels:
+Expected set labels
+-------------------
 - athlete_core
 - sedentary_core
 
 Output
 ------
-A PNG image containing a 2-set Venn diagram.
-
-Notes
------
-- The script first tries to use `matplotlib_venn`.
-- If that package is not available, it falls back to a simple circle-based plot.
+PNG image containing a 2-set Venn diagram.
 """
 
+from pathlib import Path
 import argparse
 
 
-def read_core_sets(path: str):
-    """
-    Read a core-sets TSV file with format:
+def read_core_sets(path: Path) -> dict[str, set[str]]:
+    """Read a two-column core-set TSV file: set<TAB>miRNA."""
+    sets: dict[str, set[str]] = {}
 
-        set<TAB>miRNA
+    with path.open("r") as handle:
+        header = handle.readline()
 
-    Returns
-    -------
-    dict
-        set_name -> set(miRNA)
-    """
-    sets = {}
-
-    with open(path, "r") as fh:
-        header = fh.readline()
-        for line in fh:
+        for line_number, line in enumerate(handle, start=2):
             line = line.strip()
             if not line:
                 continue
-            sname, item = line.split("\t", 1)
-            sets.setdefault(sname, set()).add(item.strip())
+
+            fields = line.split("\t")
+            if len(fields) < 2:
+                raise ValueError(
+                    f"Invalid line {line_number} in {path}: expected at least 2 tab-separated columns."
+                )
+
+            set_name, item = fields[0], fields[1]
+            sets.setdefault(set_name, set()).add(item.strip())
 
     return sets
 
 
-def main():
-    ap = argparse.ArgumentParser(
-        description="Create a 2-set Venn plot for core sets (athlete_core vs sedentary_core)."
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Create a 2-set Venn plot for active and sedentary miRNA core sets."
     )
-    ap.add_argument("--core_sets", required=True, help="Input core_sets.tsv with columns: set, miRNA")
-    ap.add_argument("--out_png", required=True, help="Output PNG path")
-    args = ap.parse_args()
+    parser.add_argument(
+        "--core_sets",
+        required=True,
+        type=Path,
+        help="Input TSV with columns: set and miRNA.",
+    )
+    parser.add_argument(
+        "--out_png",
+        required=True,
+        type=Path,
+        help="Output PNG path.",
+    )
+    args = parser.parse_args()
 
     sets = read_core_sets(args.core_sets)
-    A = sets.get("athlete_core", set())
-    B = sets.get("sedentary_core", set())
 
-    onlyA = len(A - B)
-    onlyB = len(B - A)
-    inter = len(A & B)
+    required_sets = {"athlete_core", "sedentary_core"}
+    missing = required_sets - set(sets)
+    if missing:
+        raise ValueError(
+            f"Missing expected set labels in {args.core_sets}: {', '.join(sorted(missing))}"
+        )
+
+    active_core = sets["athlete_core"]
+    sedentary_core = sets["sedentary_core"]
+
+    only_active = len(active_core - sedentary_core)
+    only_sedentary = len(sedentary_core - active_core)
+    overlap = len(active_core & sedentary_core)
+
+    args.out_png.parent.mkdir(parents=True, exist_ok=True)
 
     import matplotlib.pyplot as plt
 
-    # Preferred option: use matplotlib_venn if available
     try:
         from matplotlib_venn import venn2  # type: ignore
 
         fig = plt.figure(figsize=(5, 5))
-        venn2(subsets=(onlyA, onlyB, inter), set_labels=("athlete_core", "sedentary_core"))
-        plt.title("Core miRNAs (presence-based)")
+        venn2(
+            subsets=(only_active, only_sedentary, overlap),
+            set_labels=("Active core", "Sedentary core"),
+        )
+        plt.title("Core miRNAs")
         plt.tight_layout()
-        plt.savefig(args.out_png, dpi=200)
+        plt.savefig(args.out_png, dpi=300)
         plt.close(fig)
         return
 
-    except Exception:
+    except ImportError:
         pass
 
-    # Fallback: draw two simple circles if matplotlib_venn is unavailable
     from matplotlib.patches import Circle
 
     fig, ax = plt.subplots(figsize=(5, 5))
     ax.add_patch(Circle((0.45, 0.5), 0.30, fill=False, linewidth=2))
     ax.add_patch(Circle((0.65, 0.5), 0.30, fill=False, linewidth=2))
 
-    ax.text(0.32, 0.50, str(onlyA), ha="center", va="center", fontsize=14)
-    ax.text(0.78, 0.50, str(onlyB), ha="center", va="center", fontsize=14)
-    ax.text(0.55, 0.50, str(inter), ha="center", va="center", fontsize=14)
+    ax.text(0.32, 0.50, str(only_active), ha="center", va="center", fontsize=14)
+    ax.text(0.78, 0.50, str(only_sedentary), ha="center", va="center", fontsize=14)
+    ax.text(0.55, 0.50, str(overlap), ha="center", va="center", fontsize=14)
 
-    ax.text(0.35, 0.18, "athlete_core", ha="center", va="center", fontsize=10)
-    ax.text(0.75, 0.18, "sedentary_core", ha="center", va="center", fontsize=10)
+    ax.text(0.35, 0.18, "Active core", ha="center", va="center", fontsize=10)
+    ax.text(0.75, 0.18, "Sedentary core", ha="center", va="center", fontsize=10)
 
-    ax.set_title("Core miRNAs (presence-based)")
+    ax.set_title("Core miRNAs")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
 
     plt.tight_layout()
-    plt.savefig(args.out_png, dpi=200)
+    plt.savefig(args.out_png, dpi=300)
     plt.close(fig)
 
 

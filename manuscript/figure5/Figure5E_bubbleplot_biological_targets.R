@@ -1,18 +1,29 @@
-# ============================================================
-# plot_biological_prioritized_targets.R
+#!/usr/bin/env Rscript
+
+############################################################
+# Figure 5E – Biological prioritized target bubbleplot
+#
 # Description:
-# Generates a publication-ready dot plot of biologically
-# prioritized BrumiR target genes across sarcopenia/exercise-
-# related pathways for Figure 5d. Category names are abbreviated
-# in facet strips for better readability, while full biological
-# meanings are preserved through the color legend and figure text.
+# This script generates a publication-ready dot plot of
+# biologically prioritized BrumiR target genes across
+# sarcopenia/exercise-related pathways. Category names are
+# abbreviated in facet strips for readability, while full
+# biological meanings are preserved through the color legend
+# and figure text.
 #
-# Input:
-#   ../output/brumir_biological_targets_top.tsv
+# Inputs:
+# - TSV file with biologically prioritized BrumiR targets
+# - Output PNG file
 #
-# Output:
-#   ../plots/Figure5d_biological_prioritized_targets.png
-# ============================================================
+# Outputs:
+# - Biological prioritized target bubbleplot PNG
+#
+# Usage:
+# Rscript Figure5E_bubbleplot_biological_targets.R \
+#   brumir_biological_targets_top.tsv \
+#   Figure5E_biological_prioritized_targets.png
+#
+############################################################
 
 suppressPackageStartupMessages({
   library(readr)
@@ -21,12 +32,54 @@ suppressPackageStartupMessages({
   library(stringr)
 })
 
-infile <- "/mnt/beegfs/home/npoblete/sarcopipe/bin/module_3_analysis/v2/output/brumir_biological_targets_top.tsv"
-outfile <- "/mnt/beegfs/home/npoblete/sarcopipe/bin/module_3_analysis/v2/plots/Figure5d_biological_prioritized_targets.png"
+args <- commandArgs(trailingOnly = TRUE)
 
+if (length(args) < 2) {
+  stop(
+    "Usage: Rscript Figure5E_bubbleplot_biological_targets.R ",
+    "<brumir_biological_targets_top.tsv> <output.png>",
+    call. = FALSE
+  )
+}
+
+infile <- args[1]
+outfile <- args[2]
+
+if (!file.exists(infile)) {
+  stop("Input TSV not found: ", infile, call. = FALSE)
+}
+
+out_dir <- dirname(outfile)
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+}
+
+# -------------------------
+# LOAD DATA
+# -------------------------
 df <- read_tsv(infile, show_col_types = FALSE)
 
-# order of BrumiR candidates
+required_cols <- c(
+  "renamed_miRNA",
+  "gene_symbol",
+  "category",
+  "priority_score",
+  "n_sites"
+)
+
+missing_cols <- setdiff(required_cols, colnames(df))
+
+if (length(missing_cols) > 0) {
+  stop(
+    "Input TSV is missing required columns: ",
+    paste(missing_cols, collapse = ", "),
+    call. = FALSE
+  )
+}
+
+# -------------------------
+# PREPARE DATA
+# -------------------------
 candidate_levels <- c(
   "hsa-miR-660-5p",
   "known_seed_A",
@@ -72,7 +125,13 @@ category_colors <- c(
   "Myogenesis" = "#3b6fb6"
 )
 
-p <- ggplot(df, aes(x = renamed_miRNA, y = gene_label, size = n_sites, color = category)) +
+# -------------------------
+# PLOT
+# -------------------------
+p <- ggplot(
+  df,
+  aes(x = renamed_miRNA, y = gene_label, size = n_sites, color = category)
+) +
   geom_point(alpha = 0.95) +
   scale_color_manual(values = category_colors) +
   scale_size_continuous(range = c(3, 10)) +
@@ -94,4 +153,9 @@ p <- ggplot(df, aes(x = renamed_miRNA, y = gene_label, size = n_sites, color = c
     panel.grid.minor = element_blank()
   )
 
+# -------------------------
+# SAVE
+# -------------------------
 ggsave(outfile, p, width = 9, height = 10, dpi = 300)
+
+cat("Biological target bubbleplot written to:", outfile, "\n")

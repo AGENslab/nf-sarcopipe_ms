@@ -1,61 +1,117 @@
 #!/usr/bin/env python3
-# ============================================================
-# run_seed_matching_sarcopenia_targets.py
-# Description:
-# Performs seed-based miRNA target prediction against a curated
-# sarcopenia/exercise-related gene set using available 3'UTR
-# sequences. Applies the same methodology to BrumiR and miRDeep2.
-#
-# Inputs:
-#   ../input/input_sarcopenia_gene_set.txt
-#   ../input/input_mRNA_36/all_miRNA_seed_summary.tsv
-#   ../output/DEG_36_3UTR_final.tsv
-#
-# Output:
-#   ../output/seed_matches_sarcopenia.tsv
-# ============================================================
 
-from pathlib import Path
+"""
+Figure 5E – Seed matching against sarcopenia targets
+
+Description
+-----------
+This script performs seed-based miRNA target prediction against a
+curated sarcopenia/exercise-related gene set using available 3'UTR
+sequences. The same methodology is applied to BrumiR and miRDeep2
+miRNAs.
+
+Inputs
+------
+--genes
+    Text file containing sarcopenia/exercise-related gene symbols.
+
+--mirna
+    TSV file containing miRNA seed summary information.
+
+--utr
+    TSV file containing gene_symbol and utr_3 columns.
+
+--out
+    Output TSV file with seed matches.
+
+Outputs
+-------
+seed_matches_sarcopenia.tsv
+
+Usage
+-----
+python3 Figure5E_seed_matching_sarcopenia_targets.py \\
+  --genes input_sarcopenia_gene_set.txt \\
+  --mirna all_miRNA_seed_summary.tsv \\
+  --utr sarcopenia_gene_set_3UTR.tsv \\
+  --out seed_matches_sarcopenia.tsv
+"""
+
+import argparse
 import csv
+from pathlib import Path
 
-BASE = Path("/mnt/beegfs/home/npoblete/sarcopipe/bin/module_3_analysis/v2")
-INPUT = BASE / "input"
-OUTPUT = BASE / "output"
 
-GENES = INPUT / "input_sarcopenia_gene_set.txt"
-MIRNA = INPUT / "input_mRNA_36" / "all_miRNA_seed_summary.tsv"
-UTR = OUTPUT / "sarcopenia_gene_set_3UTR.tsv"
+FIELDNAMES = [
+    "gene_symbol",
+    "renamed_miRNA",
+    "source",
+    "seed",
+    "seed_rc",
+    "n_sites",
+    "site_positions",
+    "log2FoldChange",
+    "direction",
+]
 
-OUT = OUTPUT / "seed_matches_sarcopenia.tsv"
+
+def validate_file(path: str, label: str) -> Path:
+    """Validate that an input file exists."""
+    file_path = Path(path)
+
+    if not file_path.is_file():
+        raise SystemExit(f"ERROR: {label} not found: {file_path}")
+
+    return file_path
+
+
+def prepare_output(path: str) -> Path:
+    """Create parent directory for an output file if needed."""
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    return output_path
+
 
 def revcomp_rna(seed: str) -> str:
-    comp = str.maketrans({"A": "U", "U": "A", "G": "C", "C": "G", "T": "A"})
-    s = seed.upper().replace("T", "U")
-    return s.translate(comp)[::-1]
+    """Return the reverse complement of an RNA seed sequence."""
+    complement = str.maketrans({"A": "U", "U": "A", "G": "C", "C": "G", "T": "A"})
+    seed_rna = seed.upper().replace("T", "U")
 
-def load_mirnas():
+    return seed_rna.translate(complement)[::-1]
+
+
+def load_mirnas(mirna_file: Path) -> list:
+    """Load miRNAs and seed information from the seed summary table."""
     mirnas = []
-    with open(MIRNA, encoding="utf-8", errors="ignore") as f:
+
+    with mirna_file.open(encoding="utf-8", errors="ignore") as handle:
         first = True
-        for line in f:
-            line = line.rstrip("\n\r")
+
+        for raw_line in handle:
+            line = raw_line.rstrip("\n\r")
+
             if not line:
                 continue
+
             if first:
                 first = False
-                continue  # saltar header contaminado
-            parts = line.split("\t")
-            if len(parts) < 7:
                 continue
 
-            source, original_id, renamed_miRNA, seed, log2fc, padj, direction = parts[:7]
+            fields = line.split("\t")
+
+            if len(fields) < 7:
+                continue
+
+            source, original_id, renamed_miRNA, seed, log2fc, padj, direction = fields[:7]
+
             seed = seed.strip().upper().replace("T", "U")
+
             if not seed:
                 continue
 
             try:
                 log2fc_val = float(log2fc)
-            except:
+            except ValueError:
                 log2fc_val = 0.0
 
             mirnas.append({
@@ -66,82 +122,147 @@ def load_mirnas():
                 "seed_rc": revcomp_rna(seed),
                 "log2FoldChange": log2fc_val,
                 "padj": padj.strip(),
-                "direction": direction.strip()
+                "direction": direction.strip(),
             })
+
     return mirnas
 
-def load_utrs():
+
+def load_utrs(utr_file: Path) -> dict:
+    """Load 3'UTR sequences by gene symbol."""
     utrs = {}
-    with open(UTR, encoding="utf-8", errors="ignore") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        for r in reader:
-            gene = r["gene_symbol"].strip()
-            seq = r["utr_3"].strip().upper().replace("T", "U")
-            if gene and seq:
-                utrs[gene] = seq
+
+    with utr_file.open(encoding="utf-8", errors="ignore") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+
+        required_cols = {"gene_symbol", "utr_3"}
+        missing_cols = required_cols - set(reader.fieldnames or [])
+
+        if missing_cols:
+            raise SystemExit(
+                "ERROR: UTR table missing required columns: "
+                f"{', '.join(sorted(missing_cols))}"
+            )
+
+        for row in reader:
+            gene = row["gene_symbol"].strip()
+            sequence = row["utr_3"].strip().upper().replace("T", "U")
+
+            if gene and sequence:
+                utrs[gene] = sequence
+
     return utrs
 
-def load_genes():
+
+def load_genes(genes_file: Path) -> set:
+    """Load target gene symbols."""
     genes = set()
-    with open(GENES, encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            g = line.strip()
-            if g:
-                genes.add(g)
+
+    with genes_file.open(encoding="utf-8", errors="ignore") as handle:
+        for line in handle:
+            gene = line.strip()
+
+            if gene:
+                genes.add(gene)
+
     return genes
 
-def find_all_positions(seq: str, motif: str):
+
+def find_all_positions(sequence: str, motif: str) -> list:
+    """Find all 1-based positions of a motif in a sequence."""
     positions = []
     start = 0
+
     while True:
-        i = seq.find(motif, start)
-        if i == -1:
+        index = sequence.find(motif, start)
+
+        if index == -1:
             break
-        positions.append(i + 1)  # 1-based
-        start = i + 1
+
+        positions.append(index + 1)
+        start = index + 1
+
     return positions
 
-def main():
-    mirnas = load_mirnas()
-    utrs = load_utrs()
-    genes = load_genes()
 
-    out = []
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Run seed matching against sarcopenia/exercise-related 3'UTRs."
+    )
+
+    parser.add_argument(
+        "--genes",
+        required=True,
+        help="Text file containing sarcopenia/exercise-related gene symbols.",
+    )
+    parser.add_argument(
+        "--mirna",
+        required=True,
+        help="TSV file containing miRNA seed summary information.",
+    )
+    parser.add_argument(
+        "--utr",
+        required=True,
+        help="TSV file containing gene_symbol and utr_3 columns.",
+    )
+    parser.add_argument(
+        "--out",
+        required=True,
+        help="Output TSV file with seed matches.",
+    )
+
+    return parser.parse_args()
+
+
+def main() -> None:
+    """Run seed-based prediction against sarcopenia target 3'UTRs."""
+    args = parse_args()
+
+    genes_file = validate_file(args.genes, "Sarcopenia gene set")
+    mirna_file = validate_file(args.mirna, "miRNA seed summary table")
+    utr_file = validate_file(args.utr, "3'UTR table")
+    out_file = prepare_output(args.out)
+
+    mirnas = load_mirnas(mirna_file)
+    utrs = load_utrs(utr_file)
+    genes = load_genes(genes_file)
+
+    output_rows = []
 
     for gene in sorted(genes):
         if gene not in utrs:
             continue
-        seq = utrs[gene]
 
-        for m in mirnas:
-            positions = find_all_positions(seq, m["seed_rc"])
+        sequence = utrs[gene]
+
+        for mirna in mirnas:
+            positions = find_all_positions(sequence, mirna["seed_rc"])
+
             if positions:
-                out.append({
+                output_rows.append({
                     "gene_symbol": gene,
-                    "renamed_miRNA": m["renamed_miRNA"],
-                    "source": m["source"],
-                    "seed": m["seed"],
-                    "seed_rc": m["seed_rc"],
+                    "renamed_miRNA": mirna["renamed_miRNA"],
+                    "source": mirna["source"],
+                    "seed": mirna["seed"],
+                    "seed_rc": mirna["seed_rc"],
                     "n_sites": len(positions),
                     "site_positions": ",".join(map(str, positions)),
-                    "log2FoldChange": m["log2FoldChange"],
-                    "direction": m["direction"]
+                    "log2FoldChange": mirna["log2FoldChange"],
+                    "direction": mirna["direction"],
                 })
 
-    with open(OUT, "w", encoding="utf-8", newline="") as f:
-        fieldnames = [
-            "gene_symbol", "renamed_miRNA", "source", "seed", "seed_rc",
-            "n_sites", "site_positions", "log2FoldChange", "direction"
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
+    with out_file.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDNAMES, delimiter="\t")
         writer.writeheader()
-        writer.writerows(out)
+        writer.writerows(output_rows)
 
     print("miRNAs loaded:", len(mirnas))
     print("genes in sarcopenia set:", len(genes))
     print("genes with available 3'UTR:", len(utrs))
-    print("matches found:", len(out))
-    print("output:", OUT)
+    print("matches found:", len(output_rows))
+    print("output:", out_file)
+
 
 if __name__ == "__main__":
     main()

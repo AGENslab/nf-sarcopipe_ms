@@ -1,13 +1,31 @@
 #!/usr/bin/env Rscript
 
-# ------------------------------------------------------------
-# Volcano plot for a single miRNA detection method.
-# This script visualizes log2 fold change versus adjusted p-value
-# for one DESeq2 result table and labels the top 10 most significant
-# miRNAs or clusters.
-# ------------------------------------------------------------
-
-.libPaths(c("~/Rlibs", .libPaths()))
+############################################################
+# Figure S1E – Volcano plot of BrumiR differential expression
+#
+# Description:
+# Generates a volcano plot for one DESeq2 miRNA result table.
+# The plot visualizes log2 fold change versus adjusted p-value
+# and labels the top 10 most significant miRNAs or clusters.
+#
+# Inputs:
+# 1) deseq2.csv:
+#    - feature
+#    - log2FoldChange
+#    - padj
+# 2) method_label:
+#    - label used in the plot title and output file names
+# 3) out_prefix:
+#    - prefix used to generate output PNG and TSV files
+#
+# Outputs:
+# - <out_prefix>_volcano_<method_label>.png
+# - <out_prefix>_volcano_<method_label>.tsv
+#
+# Usage:
+# Rscript FigureS1E_volcano_BrumiR.R \
+#   <deseq2.csv> <method_label> <out_prefix>
+############################################################
 
 suppressPackageStartupMessages({
   library(ggplot2)
@@ -19,20 +37,44 @@ suppressPackageStartupMessages({
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 3) {
-  stop("Usage: Rscript plot_volcano_single_method.R <deseq2.csv> <method_label> <out_prefix>")
+  stop(
+    "Usage: Rscript FigureS1E_volcano_BrumiR.R ",
+    "<deseq2.csv> <method_label> <out_prefix>"
+  )
 }
 
-input_file   <- args[1]
+input_file <- args[1]
 method_label <- args[2]
-out_prefix   <- args[3]
+out_prefix <- args[3]
+
+if (!file.exists(input_file)) {
+  stop("Input DESeq2 file not found: ", input_file)
+}
 
 out_plot <- paste0(out_prefix, "_volcano_", method_label, ".png")
-out_tsv  <- paste0(out_prefix, "_volcano_", method_label, ".tsv")
+out_tsv <- paste0(out_prefix, "_volcano_", method_label, ".tsv")
+
+out_dir <- dirname(out_plot)
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 # -------------------------
-# LOAD DATA
+# Load data
 # -------------------------
-df <- read_csv(input_file, show_col_types = FALSE) %>%
+df <- read_csv(input_file, show_col_types = FALSE)
+
+required_cols <- c("feature", "log2FoldChange", "padj")
+missing_cols <- setdiff(required_cols, colnames(df))
+
+if (length(missing_cols) > 0) {
+  stop(
+    "Missing required columns in DESeq2 file: ",
+    paste(missing_cols, collapse = ", ")
+  )
+}
+
+df <- df %>%
   mutate(
     padj_plot = ifelse(is.na(padj) | padj <= 0, 1, padj),
     neglog10_padj = -log10(padj_plot),
@@ -46,7 +88,7 @@ df <- read_csv(input_file, show_col_types = FALSE) %>%
 write_tsv(df, out_tsv)
 
 # -------------------------
-# TOP 10 LABELS
+# Top 10 labels
 # -------------------------
 df_top <- df %>%
   filter(!is.na(padj)) %>%
@@ -56,7 +98,7 @@ df_top <- df %>%
 x_limit <- max(abs(df$log2FoldChange), na.rm = TRUE) * 1.25
 
 # -------------------------
-# PLOT
+# Plot
 # -------------------------
 p <- ggplot(df, aes(x = log2FoldChange, y = neglog10_padj)) +
   geom_point(aes(color = regulation), size = 2.8, alpha = 0.85) +
@@ -88,11 +130,11 @@ p <- ggplot(df, aes(x = log2FoldChange, y = neglog10_padj)) +
   coord_cartesian(xlim = c(-x_limit, x_limit)) +
   theme_minimal(base_size = 16) +
   theme(
-    panel.background  = element_rect(fill = "white", color = NA),
-    plot.background   = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
     legend.background = element_rect(fill = "white", color = NA),
-    panel.grid.major  = element_line(color = "grey85"),
-    panel.grid.minor  = element_blank()
+    panel.grid.major = element_line(color = "grey85"),
+    panel.grid.minor = element_blank()
   ) +
   scale_color_manual(values = c(
     "Up in Active" = "blue",
@@ -107,13 +149,8 @@ p <- ggplot(df, aes(x = log2FoldChange, y = neglog10_padj)) +
   )
 
 # -------------------------
-# SAVE
+# Save
 # -------------------------
-out_dir <- dirname(out_plot)
-if (!dir.exists(out_dir)) {
-  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-}
-
 png(
   filename = out_plot,
   width = 2400,
@@ -122,6 +159,7 @@ png(
   bg = "white",
   type = "cairo"
 )
+
 print(p)
 dev.off()
 

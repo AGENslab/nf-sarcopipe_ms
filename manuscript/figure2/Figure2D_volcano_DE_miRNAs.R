@@ -1,14 +1,31 @@
 #!/usr/bin/env Rscript
 
-# ------------------------------------------------------------
-# Combined volcano plot for miRNA differential expression.
-# This script merges DESeq2 results from miRDeep2 and BrumiR
-# and visualizes log2 fold change versus adjusted p-value.
-# Points are colored by regulation direction and shaped by method.
-# The top 20 most significant miRNAs are labeled using ggrepel.
-# ------------------------------------------------------------
-
-.libPaths(c("~/Rlibs", .libPaths()))
+############################################################
+# Figure 2D – Volcano plot of differentially expressed miRNAs
+#
+# Description:
+# This script generates a combined volcano plot for miRNA
+# differential expression results obtained from BrumiR and
+# miRDeep2. DESeq2 result tables are merged, classified by
+# regulation direction, and visualized using log2 fold change
+# and adjusted p-value.
+#
+# Inputs:
+# - BrumiR DESeq2 results CSV file
+# - miRDeep2 DESeq2 results CSV file
+# - Output prefix
+#
+# Outputs:
+# - <out_prefix>_volcano_mirna_expression.png
+# - <out_prefix>_volcano_mirna_expression.tsv
+#
+# Usage:
+# Rscript Figure2D_volcano_DE_miRNAs.R \
+#   <brumir_deseq2.csv> \
+#   <mirdeep2_deseq2.csv> \
+#   <out_prefix>
+#
+############################################################
 
 suppressPackageStartupMessages({
   library(ggplot2)
@@ -20,15 +37,32 @@ suppressPackageStartupMessages({
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 3) {
-  stop("Usage: Rscript plot_volcano_mirna_expression.R <brumir_deseq2.csv> <mirdeep2_deseq2.csv> <out_prefix>")
+  stop(
+    "Usage: Rscript Figure2D_volcano_DE_miRNAs.R ",
+    "<brumir_deseq2.csv> <mirdeep2_deseq2.csv> <out_prefix>",
+    call. = FALSE
+  )
 }
 
-brumir_file  <- args[1]
+brumir_file <- args[1]
 mirdeep_file <- args[2]
-out_prefix   <- args[3]
+out_prefix <- args[3]
+
+if (!file.exists(brumir_file)) {
+  stop("Input file not found: ", brumir_file, call. = FALSE)
+}
+
+if (!file.exists(mirdeep_file)) {
+  stop("Input file not found: ", mirdeep_file, call. = FALSE)
+}
 
 out_plot <- paste0(out_prefix, "_volcano_mirna_expression.png")
-out_tsv  <- paste0(out_prefix, "_volcano_mirna_expression.tsv")
+out_tsv <- paste0(out_prefix, "_volcano_mirna_expression.tsv")
+
+out_dir <- dirname(out_plot)
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+}
 
 # -------------------------
 # LOAD DATA
@@ -65,14 +99,18 @@ df_top <- df %>%
   slice_head(n = 10) %>%
   ungroup()
 
-# wider x-axis
+# Wider x-axis
 x_limit <- max(abs(df$log2FoldChange), na.rm = TRUE) * 1.35
 
 # -------------------------
 # PLOT
 # -------------------------
 p <- ggplot(df, aes(x = log2FoldChange, y = neglog10_padj)) +
-  geom_point(aes(color = regulation, shape = method), size = 2.8, alpha = 0.85) +
+  geom_point(
+    aes(color = regulation, shape = method),
+    size = 2.8,
+    alpha = 0.85
+  ) +
   geom_hline(
     yintercept = -log10(0.05),
     linetype = "dashed",
@@ -101,11 +139,11 @@ p <- ggplot(df, aes(x = log2FoldChange, y = neglog10_padj)) +
   coord_cartesian(xlim = c(-x_limit, x_limit)) +
   theme_minimal(base_size = 16) +
   theme(
-    panel.background  = element_rect(fill = "white", color = NA),
-    plot.background   = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
     legend.background = element_rect(fill = "white", color = NA),
-    panel.grid.major  = element_line(color = "grey85"),
-    panel.grid.minor  = element_blank()
+    panel.grid.major = element_line(color = "grey85"),
+    panel.grid.minor = element_blank()
   ) +
   scale_color_manual(values = c(
     "Up in Active" = "blue",
@@ -127,11 +165,6 @@ p <- ggplot(df, aes(x = log2FoldChange, y = neglog10_padj)) +
 # -------------------------
 # SAVE
 # -------------------------
-out_dir <- dirname(out_plot)
-if (!dir.exists(out_dir)) {
-  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-}
-
 png(
   filename = out_plot,
   width = 2600,
