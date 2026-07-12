@@ -14,7 +14,7 @@ manuscript/
 ├── supplementary2/
 ├── supplementary3/
 └── supplementary4/
-└── supp_table2/
+└── supp_table1/
 ```
 
 Each directory contains:
