@@ -1,40 +1,61 @@
-# Supplementary Figure 4 – Extended analysis of predicted miRNA–mRNA interactions and pathway enrichment.
+# Supplementary Figure 4 – Extended pathway enrichment and validation of musculoskeletal-associated miRNA targets
 
 This directory contains the scripts used to generate Supplementary Figure 4 of the manuscript.
 
 ---
 
-## Supplementary Figure S4A – KEGG enrichment of coherent target genes
+## Supplementary Figure S4A – KEGG pathway enrichment
 
 ### Scripts
 
-- FigureS4A_union_KEGG_enrichment.R
+- FigureS4AB_prepare_source_specific_enrichment.R
+- FigureS4AB_plot_source_specific_KEGG_Reactome_enrichment.R
 
 ### Output
 
-- KEGG pathway enrichment analysis performed using the union of coherent predicted target genes.
+KEGG pathway enrichment analysis performed separately for validated target genes regulated by de novo and annotated miRNAs.
 
-**Note**
-
-This panel presents the complete KEGG enrichment results obtained from the union of coherent targets. Because only a limited number of pathways reached statistical significance, this analysis is provided as supplementary material.
+This panel provides the complete KEGG enrichment results complementary to the Gene Ontology analysis presented in Figure 5D.
 
 ---
 
-## Supplementary Figure S4B – Prioritized predicted target genes
+## Supplementary Figure S4B – Reactome pathway enrichment
 
 ### Scripts
 
-- FigureS4B_prepare_prioritized_targets.py
-- FigureS4B_plot_prioritized_targets.R
+- FigureS4AB_prepare_source_specific_enrichment.R
+- FigureS4AB_plot_source_specific_KEGG_Reactome_enrichment.R
 
 ### Output
 
-- Bubble plot showing prioritized predicted target genes ranked according to interaction strength (number of seed-matched sites) and prediction support.
+Reactome pathway enrichment analysis performed separately for validated target genes regulated by de novo and annotated miRNAs.
 
-Bubble size represents the total number of predicted seed-matched interaction sites, while colors indicate whether targets were supported by both miRNA discovery approaches or uniquely identified by miRDeep2.
+Although no pathways remained significant after multiple-testing correction, the highest-ranking pathways provide additional biological context for the coherent regulatory networks reconstructed by nf-Sarcopipe.
+
+---
+
+## Supplementary Figure S4C – Validated interactions with sarcopenia-associated genes
+
+### Scripts
+
+- FigureS4C_prepare_validated_sarcopenia_pairs.py
+- FigureS4C_plot_validated_sarcopenia_pairs.R
+
+### Output
+
+Summary of validated miRNA–mRNA interactions involving a curated set of genes associated with sarcopenia and skeletal muscle biology.
+
+Interactions are grouped according to their biological function (muscle growth/atrophy, senescence/damage and extracellular matrix remodeling) and display:
+
+- de novo and annotated miRNAs;
+- absolute miRNA log2 fold change;
+- number of predicted seed-matched sites;
+- validation support by miRanda or multiMiR.
 
 ---
 
 ## Notes
 
-Supplementary Figure 4 summarizes complementary downstream analyses of the coherent miRNA–mRNA interaction network. These analyses provide additional biological context and prioritize candidate target genes for future experimental validation.
+Supplementary Figure 4 provides complementary analyses supporting the integrated miRNA–mRNA regulatory framework presented in Figure 5.
+
+The KEGG and Reactome enrichment analyses were generated using the same source-specific enrichment workflow used for Figure 5D, whereas Supplementary Figure 4C summarizes validated interactions obtained from the sarcopenia-focused analysis presented in Figure 5F.
